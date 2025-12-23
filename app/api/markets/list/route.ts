@@ -29,7 +29,7 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
   const page = InputValidator.validatePage(pageParam)
   const sortBy = 3 // Volume Descending (default per requirements)
 
-  // Check cache first (15s TTL for market list)
+  // Check cache first (30s TTL for market list to balance freshness and rate limiting)
   const cacheKey = `markets-list:${page}:${sortBy}`
   const cachedData = cache.get<{ markets: MarketWithPrices[], total: number }>(cacheKey)
   
@@ -92,8 +92,8 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
 
   const result = { markets: marketsWithPrices, total }
 
-  // Cache the results for 15 seconds
-  cache.set(cacheKey, result, 15)
+  // Cache the results for 30 seconds to balance freshness and rate limiting
+  cache.set(cacheKey, result, 30)
 
   return NextResponse.json(result)
 }

@@ -122,26 +122,26 @@ export class OpinionClient {
       // Handle Opinion API response structure: { code: 0, msg: "success", result: { total: number, list: Market[] } }
       if (!response) {
         console.warn('[OpinionClient] Empty response for markets')
-        return []
+        return { markets: [], total: 0 }
       }
 
       // Check for API-level errors (code !== 0 means error per API documentation)
       // Some responses may not have code field, so we check if it exists and is non-zero
       if (response.code !== undefined && response.code !== 0) {
         console.warn(`[OpinionClient] API returned error for markets: code=${response.code}, msg=${response.msg || response.errmsg || ''}`)
-        return []
+        return { markets: [], total: 0 }
       }
       
       // Also check errno field (used by some endpoints like positions)
       if (response.errno !== undefined && response.errno !== 0) {
         console.warn(`[OpinionClient] API returned error for markets: errno=${response.errno}, errmsg=${response.errmsg || ''}`)
-        return []
+        return { markets: [], total: 0 }
       }
 
       // Data is in result.list according to documentation
       if (!response.result) {
         console.warn('[OpinionClient] No result field in markets response:', response)
-        return []
+        return { markets: [], total: 0 }
       }
 
       if (!Array.isArray(response.result.list)) {
@@ -150,7 +150,7 @@ export class OpinionClient {
           resultType: typeof response.result,
           listType: typeof response.result.list
         })
-        return []
+        return { markets: [], total: 0 }
       }
 
       const total = response.result.total || 0
