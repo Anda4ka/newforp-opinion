@@ -9,16 +9,14 @@ import { twMerge } from 'tailwind-merge'
 import {
   Activity,
   ArrowUpRight,
-  Clock,
   LineChart as LineChartIcon,
-  Shuffle,
   TrendingUp,
   Wallet,
   X,
 } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
-import type { ArbitrageOpportunity, EndingSoonMarket, MarketMover, UserPosition } from '@/lib/types'
+import type { MarketMover, UserPosition } from '@/lib/types'
 
 function cn(...classes: ClassValue[]) {
   return twMerge(clsx(classes))
@@ -213,19 +211,7 @@ export default function Home() {
     { refreshInterval: 30_000, revalidateOnFocus: false }
   )
 
-  const endingSoon = useSWR<EndingSoonMarket[]>(
-    '/api/markets/ending-soon?hours=24',
-    fetcher,
-    { refreshInterval: 60_000, revalidateOnFocus: false }
-  )
-
-  const arbitrage = useSWR<ArbitrageOpportunity[]>(
-    '/api/markets/arbitrage',
-    fetcher,
-    { refreshInterval: 15_000, revalidateOnFocus: false }
-  )
-
-  const positions = useSWR<any[]>(
+  const positions = useSWR<UserPosition[]>(
     watchedAddress ? `/api/user/positions?address=${encodeURIComponent(watchedAddress)}` : null,
     fetcher,
     { refreshInterval: 30_000, revalidateOnFocus: false }
@@ -242,7 +228,7 @@ export default function Home() {
             </h1>
           </div>
           <p className="mt-1 text-sm text-slate-400">
-            Movers, ending soon markets, arbitrage, and wallet positions.
+            Track market movers and monitor wallet positions.
           </p>
         </div>
 
@@ -269,164 +255,67 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <section className="rounded-2xl bg-slate-950 ring-1 ring-white/10">
-          <div className="border-b border-white/10 px-5 py-4">
-            <SectionHeader
-              icon={<TrendingUp className="h-4 w-4 text-slate-300" />}
-              title="Top Movers"
-              subtitle="Biggest 24h market-price changes"
-            />
-          </div>
+      <section className="mt-8 rounded-2xl bg-slate-950 ring-1 ring-white/10">
+        <div className="border-b border-white/10 px-5 py-4">
+          <SectionHeader
+            icon={<TrendingUp className="h-4 w-4 text-slate-300" />}
+            title="Top Movers"
+            subtitle="Biggest 24h market-price changes"
+          />
+        </div>
 
-          <div className="p-4">
-            {movers.isLoading ? <SkeletonList /> : null}
-            {movers.error ? <EmptyState label="Failed to load movers." /> : null}
-            {!movers.isLoading && !movers.error && (movers.data?.length || 0) === 0 ? (
-              <EmptyState label="No mover data available." />
-            ) : null}
+        <div className="p-4">
+          {movers.isLoading ? <SkeletonList /> : null}
+          {movers.error ? <EmptyState label="Failed to load movers." /> : null}
+          {!movers.isLoading && !movers.error && (movers.data?.length || 0) === 0 ? (
+            <EmptyState label="No mover data available." />
+          ) : null}
 
-            <div className="space-y-2">
-              {(movers.data || []).slice(0, 10).map((m) => {
-                const positive = m.priceChangePct >= 0
-                return (
-                  <button
-                    key={m.marketId}
-                    onClick={() => setSelectedMover(m)}
-                    className="w-full rounded-xl bg-slate-900/40 p-4 text-left ring-1 ring-white/10 transition hover:bg-slate-900/60"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-100">{m.marketTitle}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                          <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                            YES {m.yesPrice.toFixed(3)}
-                          </span>
-                          <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                            NO {m.noPrice.toFixed(3)}
-                          </span>
-                          <span className="rounded-md bg-slate-900 px-2 py-1 font-mono text-[11px] text-slate-500 ring-1 ring-white/10">
-                            {m.yesTokenId.slice(0, 10)}…
-                          </span>
-                        </div>
-                      </div>
-
-                      <div
-                        className={cn(
-                          'shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold ring-1',
-                          positive
-                            ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
-                            : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
-                        )}
-                      >
-                        {formatPct(m.priceChangePct)}
-                      </div>
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">
-                      24h volume: <span className="text-slate-300">${formatUsdCompact(Number(m.volume24h) || 0)}</span>
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-2xl bg-slate-950 ring-1 ring-white/10">
-          <div className="border-b border-white/10 px-5 py-4">
-            <SectionHeader
-              icon={<Clock className="h-4 w-4 text-slate-300" />}
-              title="Ending Soon"
-              subtitle="Markets ending in the next 24h"
-            />
-          </div>
-          <div className="p-4">
-            {endingSoon.isLoading ? <SkeletonList /> : null}
-            {endingSoon.error ? <EmptyState label="Failed to load ending soon markets." /> : null}
-            {!endingSoon.isLoading && !endingSoon.error && (endingSoon.data?.length || 0) === 0 ? (
-              <EmptyState label="No ending soon markets right now." />
-            ) : null}
-
-            <div className="space-y-2">
-              {(endingSoon.data || []).slice(0, 10).map((m) => (
-                <div
+          <div className="space-y-2">
+            {(movers.data || []).slice(0, 10).map((m) => {
+              const positive = m.priceChangePct >= 0
+              return (
+                <button
                   key={m.marketId}
-                  className="rounded-xl bg-slate-900/40 p-4 ring-1 ring-white/10"
+                  onClick={() => setSelectedMover(m)}
+                  className="w-full rounded-xl bg-slate-900/40 p-4 text-left ring-1 ring-white/10 transition hover:bg-slate-900/60"
                 >
-                  <div className="truncate text-sm font-semibold text-slate-100">{m.marketTitle}</div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                    <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                      YES {m.yesPrice.toFixed(3)}
-                    </span>
-                    <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                      Cutoff {new Date(m.cutoffAt * 1000).toLocaleString()}
-                    </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-100">{m.marketTitle}</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
+                          YES {m.yesPrice.toFixed(3)}
+                        </span>
+                        <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
+                          NO {m.noPrice.toFixed(3)}
+                        </span>
+                        <span className="rounded-md bg-slate-900 px-2 py-1 font-mono text-[11px] text-slate-500 ring-1 ring-white/10">
+                          {m.yesTokenId.slice(0, 10)}…
+                        </span>
+                      </div>
+                    </div>
+
+                    <div
+                      className={cn(
+                        'shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold ring-1',
+                        positive
+                          ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
+                      )}
+                    >
+                      {formatPct(m.priceChangePct)}
+                    </div>
                   </div>
                   <div className="mt-2 text-xs text-slate-500">
-                    24h volume: <span className="text-slate-300">${formatUsdCompact(Number(m.volume) || 0)}</span>
+                    24h volume: <span className="text-slate-300">${formatUsdCompact(Number(m.volume24h) || 0)}</span>
                   </div>
-                </div>
-              ))}
-            </div>
+                </button>
+              )
+            })}
           </div>
-        </section>
-
-        <section className="rounded-2xl bg-slate-950 ring-1 ring-white/10">
-          <div className="border-b border-white/10 px-5 py-4">
-            <SectionHeader
-              icon={<Shuffle className="h-4 w-4 text-slate-300" />}
-              title="Arbitrage Opportunities"
-              subtitle="Significant mispricings (4%+)"
-            />
-          </div>
-          <div className="p-4">
-            {arbitrage.isLoading ? <SkeletonList /> : null}
-            {arbitrage.error ? <EmptyState label="Failed to load arbitrage opportunities." /> : null}
-            {!arbitrage.isLoading && !arbitrage.error && (arbitrage.data?.length || 0) === 0 ? (
-              <EmptyState label="No significant arbitrage opportunities found." />
-            ) : null}
-
-            <div className="space-y-2">
-              {(arbitrage.data || []).slice(0, 10).map((a) => {
-                const positive = a.arbPct >= 0
-                return (
-                  <div
-                    key={a.marketId}
-                    className="rounded-xl bg-slate-900/40 p-4 ring-1 ring-white/10"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-100">{a.marketTitle}</div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                          <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                            YES {a.yesPrice.toFixed(3)}
-                          </span>
-                          <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                            NO {a.noPrice.toFixed(3)}
-                          </span>
-                          <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                            {a.suggestion === 'YES_UNDERPRICED' ? 'Buy YES' : 'Buy NO'}
-                          </span>
-                        </div>
-                      </div>
-                      <div
-                        className={cn(
-                          'shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold ring-1',
-                          positive
-                            ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
-                            : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
-                        )}
-                      >
-                        {a.arbPct.toFixed(2)}%
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </section>
-      </div>
+        </div>
+      </section>
 
       {watchedAddress ? (
         <section className="mt-6 rounded-2xl bg-slate-950 ring-1 ring-white/10">
