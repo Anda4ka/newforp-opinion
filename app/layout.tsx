@@ -1,6 +1,8 @@
+import './globals.css'
+
 export const metadata = {
-  title: 'Prediction Markets Backend',
-  description: 'Analytical backend for prediction markets using Opinion OpenAPI',
+  title: 'Prediction Markets Dashboard',
+  description: 'Crypto prediction markets analytics dashboard',
 }
 
 export default function RootLayout({
@@ -10,7 +12,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="min-h-screen">{children}</body>
     </html>
   )
 }

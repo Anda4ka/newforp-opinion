@@ -110,6 +110,8 @@ async function moversHandler(request: NextRequest): Promise<NextResponse> {
         currentMarketPrice,
         priceChange,
         market.volume24h,
+        market.yesTokenId,
+        market.noTokenId,
         currentYesPrice,
         currentNoPrice
       )

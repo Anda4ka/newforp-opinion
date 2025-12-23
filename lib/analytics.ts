@@ -152,6 +152,8 @@ export const createMarketMover = (
   marketPriceValue: number,
   priceChange: number,
   volume24h: string,
+  yesTokenId: string,
+  noTokenId: string,
   yesPrice: number,
   noPrice: number
 ): MarketMover => {
@@ -161,6 +163,8 @@ export const createMarketMover = (
     marketPrice: marketPriceValue,
     priceChangePct: priceChange,
     volume24h,
+    yesTokenId,
+    noTokenId,
     yesPrice,
     noPrice
   }

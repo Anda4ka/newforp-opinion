@@ -68,6 +68,16 @@ export class InputValidator {
     }
 
     const sanitized = hoursParam.trim()
+    
+    // Require a strict integer (reject "1.5", "1e3", etc.)
+    if (!/^\d+$/.test(sanitized)) {
+      throw new APIError(
+        'Invalid hours parameter. Must be a positive number between 1 and 8760',
+        ErrorType.VALIDATION,
+        400
+      )
+    }
+
     const hours = parseInt(sanitized, 10)
     
     if (isNaN(hours) || hours <= 0 || hours > 8760) { // Max 1 year

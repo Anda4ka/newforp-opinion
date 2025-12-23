@@ -27,6 +27,8 @@ export interface MarketMover {
   marketPrice: number
   priceChangePct: number
   volume24h: string
+  yesTokenId: string
+  noTokenId: string
   yesPrice: number
   noPrice: number
 }

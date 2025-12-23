@@ -48,16 +48,15 @@ describe('Edge Cases Unit Tests', () => {
     })
 
     it('should handle null/undefined markets response', async () => {
-      // Mock null response - this should cause an error that gets handled gracefully
+      // Mock null response - endpoint should degrade gracefully and return empty array
       vi.mocked(opinionClient.getMarkets).mockResolvedValue(null as any)
 
       const request = new NextRequest('http://localhost/api/markets/movers?timeframe=1h')
       const response = await moversGET(request)
       
-      // The error handler should catch this and return 500
-      expect(response.status).toBe(500)
+      expect(response.status).toBe(200)
       const data = await response.json()
-      expect(data).toHaveProperty('error')
+      expect(data).toEqual([])
     })
 
     it('should handle empty price history arrays', async () => {

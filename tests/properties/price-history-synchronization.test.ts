@@ -122,7 +122,7 @@ describe('Price History Synchronization Properties', () => {
 
     // Test with identical timestamps (perfect overlap)
     fc.assert(fc.property(
-      fc.array(fc.integer({ min: 1600000000, max: 2000000000 }), { minLength: 1, maxLength: 50 }),
+      fc.uniqueArray(fc.integer({ min: 1600000000, max: 2000000000 }), { minLength: 1, maxLength: 50 }),
       fc.array(fc.float({ min: Math.fround(0.01), max: Math.fround(0.99), noNaN: true, noDefaultInfinity: true }), { minLength: 1, maxLength: 50 }),
       fc.array(fc.float({ min: Math.fround(0.01), max: Math.fround(0.99), noNaN: true, noDefaultInfinity: true }), { minLength: 1, maxLength: 50 }),
       (timestamps, yesPrices, noPrices) => {

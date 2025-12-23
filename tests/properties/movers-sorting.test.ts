@@ -18,6 +18,8 @@ describe('Movers Sorting Properties', () => {
     marketPrice: fc.float({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
     priceChangePct: fc.float({ min: -1, max: 1, noNaN: true, noDefaultInfinity: true }),
     volume24h: fc.float({ min: 0, max: 1000000, noNaN: true, noDefaultInfinity: true }).map(v => v.toString()),
+    yesTokenId: fc.string({ minLength: 1, maxLength: 128 }),
+    noTokenId: fc.string({ minLength: 1, maxLength: 128 }),
     yesPrice: fc.float({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true }),
     noPrice: fc.float({ min: 0, max: 1, noNaN: true, noDefaultInfinity: true })
   }) as fc.Arbitrary<MarketMover>
@@ -63,6 +65,8 @@ describe('Movers Sorting Properties', () => {
           marketPrice: 0.5,
           priceChangePct: priceChange,
           volume24h: vol.toString(),
+          yesTokenId: `yes-token-${idx}`,
+          noTokenId: `no-token-${idx}`,
           yesPrice: 0.5,
           noPrice: 0.5
         }))

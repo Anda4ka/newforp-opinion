@@ -24,6 +24,8 @@ describe('Response Structure Completeness', () => {
         marketPrice: fc.float({ min: 0, max: 1, noNaN: true }),
         priceChangePct: fc.float({ min: -1, max: 1, noNaN: true }),
         volume24h: fc.string({ minLength: 1, maxLength: 50 }),
+        yesTokenId: fc.string({ minLength: 1, maxLength: 128 }),
+        noTokenId: fc.string({ minLength: 1, maxLength: 128 }),
         yesPrice: fc.float({ min: 0, max: 1, noNaN: true }),
         noPrice: fc.float({ min: 0, max: 1, noNaN: true })
       }),
@@ -35,11 +37,15 @@ describe('Response Structure Completeness', () => {
           typeof mover.marketPrice === 'number' &&
           typeof mover.priceChangePct === 'number' &&
           typeof mover.volume24h === 'string' &&
+          typeof mover.yesTokenId === 'string' &&
+          typeof mover.noTokenId === 'string' &&
           typeof mover.yesPrice === 'number' &&
           typeof mover.noPrice === 'number' &&
           mover.marketId > 0 &&
           mover.marketTitle.length > 0 &&
           mover.volume24h.length > 0 &&
+          mover.yesTokenId.length > 0 &&
+          mover.noTokenId.length > 0 &&
           !isNaN(mover.marketPrice) &&
           !isNaN(mover.priceChangePct) &&
           !isNaN(mover.yesPrice) &&

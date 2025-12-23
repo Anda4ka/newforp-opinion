@@ -173,6 +173,25 @@ export class OpinionClient {
   }
 
   /**
+   * Get user positions for a wallet address
+   * Frontend-facing helper: returns [] on failure to avoid breaking UI flows
+   */
+  async getUserPositions(walletAddress: string): Promise<any[]> {
+    try {
+      const response = await this.makeRequest<any>(`/positions/user/${walletAddress}`)
+
+      if (!response || !Array.isArray(response.data)) {
+        return []
+      }
+
+      return response.data
+    } catch (error) {
+      console.error(`Failed to fetch user positions for ${walletAddress}:`, error)
+      return []
+    }
+  }
+
+  /**
    * Get rate limiter status for monitoring
    */
   getRateLimiterStatus(): { circuitBreakerState: string } {

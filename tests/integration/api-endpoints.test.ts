@@ -112,6 +112,8 @@ describe('API Endpoints Integration Tests', () => {
       expect(mover).toHaveProperty('marketPrice')
       expect(mover).toHaveProperty('priceChangePct')
       expect(mover).toHaveProperty('volume24h')
+      expect(mover).toHaveProperty('yesTokenId')
+      expect(mover).toHaveProperty('noTokenId')
       expect(mover).toHaveProperty('yesPrice')
       expect(mover).toHaveProperty('noPrice')
 
