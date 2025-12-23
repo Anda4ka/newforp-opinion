@@ -1,4 +1,4 @@
-import { Market, PriceData, PriceHistoryPoint } from './types'
+import { Market, PriceData, PriceHistoryPoint, UserPosition } from './types'
 import { getConfig } from './config'
 import { rateLimiter, ExponentialBackoff } from './rateLimiter'
 
@@ -84,6 +84,7 @@ export class OpinionClient {
   /**
    * Get all available markets with rate limiting
    * Maps Opinion API response to internal Market interface
+   * Returns empty array on failure - no fallback data
    */
   async getMarkets(): Promise<Market[]> {
     try {
@@ -94,13 +95,35 @@ export class OpinionClient {
         1000 // 1 second base delay
       )
       
-      // Requirement 6.2: Handle responses with missing data gracefully
-      if (!response || !Array.isArray(response.data)) {
-        console.warn('Opinion API returned invalid markets response, using fallback data')
-        return this.getFallbackMarkets()
+      // Handle Opinion API response structure: { errmsg, errno, result: { data } }
+      if (!response) {
+        console.warn('[OpinionClient] Empty response for markets')
+        return []
       }
 
-      return response.data.map((market: any) => ({
+      // Check for API-level errors
+      if (response.errno !== undefined && response.errno !== 0) {
+        console.warn(`[OpinionClient] API returned error for markets: errno=${response.errno}, errmsg=${response.errmsg}`)
+        return []
+      }
+
+      // Try different response structures
+      let marketsData: any[] = []
+      
+      if (response.result && Array.isArray(response.result.data)) {
+        marketsData = response.result.data
+      } else if (response.result && Array.isArray(response.result)) {
+        marketsData = response.result
+      } else if (Array.isArray(response.data)) {
+        marketsData = response.data
+      } else if (Array.isArray(response)) {
+        marketsData = response
+      } else {
+        console.warn('[OpinionClient] Unexpected markets response structure:', response)
+        return []
+      }
+
+      return marketsData.map((market: any) => ({
         id: market.marketId || market.id || 0,
         title: market.marketTitle || market.title || '',
         yesTokenId: market.yesTokenId || '',
@@ -110,83 +133,162 @@ export class OpinionClient {
         volume24h: market.volume24h || '0',
       }))
     } catch (error) {
-      // Requirement 6.2: Handle errors gracefully without application crash
-      console.error('Failed to fetch markets:', error)
-      console.warn('Using fallback market data due to API unavailability')
-      return this.getFallbackMarkets()
+      console.error('[OpinionClient] Failed to fetch markets:', error)
+      return []
     }
   }
 
   /**
    * Get latest price for a specific token with rate limiting
    * Returns current price data with timestamp
+   * Returns zero price on failure - no fallback data
    */
   async getLatestPrice(tokenId: string): Promise<PriceData> {
     try {
       const response = await this.makeRequest<any>(`/tokens/${tokenId}/price`)
       
-      // Requirement 6.2: Handle responses with missing data gracefully
-      if (!response || !response.data) {
-        console.warn(`No price data from API for token ${tokenId}, using fallback`)
-        return this.getFallbackPrice(tokenId)
+      if (!response) {
+        console.warn(`[OpinionClient] Empty response for token ${tokenId} price`)
+        return { tokenId, price: '0', timestamp: Date.now() }
       }
 
-      const priceData = response.data
+      // Check for API-level errors
+      if (response.errno !== undefined && response.errno !== 0) {
+        console.warn(`[OpinionClient] API returned error for token ${tokenId} price: errno=${response.errno}, errmsg=${response.errmsg}`)
+        return { tokenId, price: '0', timestamp: Date.now() }
+      }
+
+      // Try different response structures
+      let priceData: any = null
+      
+      if (response.result && response.result.data) {
+        priceData = response.result.data
+      } else if (response.result && response.result.price !== undefined) {
+        priceData = response.result
+      } else if (response.data) {
+        priceData = response.data
+      } else if (response.price !== undefined) {
+        priceData = response
+      } else {
+        console.warn(`[OpinionClient] Unexpected price response structure for token ${tokenId}:`, response)
+        return { tokenId, price: '0', timestamp: Date.now() }
+      }
+
       return {
         tokenId,
         price: priceData.price || '0',
         timestamp: priceData.timestamp || Date.now(),
       }
     } catch (error) {
-      // Requirement 6.2: Handle errors gracefully without application crash
-      console.error(`Failed to fetch price for token ${tokenId}:`, error)
-      console.warn(`Using fallback price for token ${tokenId}`)
-      return this.getFallbackPrice(tokenId)
+      console.error(`[OpinionClient] Failed to fetch price for token ${tokenId}:`, error)
+      return { tokenId, price: '0', timestamp: Date.now() }
     }
   }
 
   /**
    * Get price history for a specific token with rate limiting
    * Returns array of historical price points
+   * Returns empty array on failure - no fallback data
    */
   async getPriceHistory(tokenId: string, interval: string = '1h'): Promise<PriceHistoryPoint[]> {
     try {
       const params = { interval }
       const response = await this.makeRequest<any>(`/tokens/${tokenId}/price-history`, params)
       
-      // Requirement 6.2: Handle responses with missing data gracefully
-      if (!response || !Array.isArray(response.data)) {
-        console.warn(`No price history from API for token ${tokenId}, using fallback`)
-        return this.getFallbackPriceHistory(tokenId, interval)
+      if (!response) {
+        console.warn(`[OpinionClient] Empty response for token ${tokenId} price history`)
+        return []
       }
 
-      return response.data.map((point: any) => ({
+      // Check for API-level errors
+      if (response.errno !== undefined && response.errno !== 0) {
+        console.warn(`[OpinionClient] API returned error for token ${tokenId} price history: errno=${response.errno}, errmsg=${response.errmsg}`)
+        return []
+      }
+
+      // Try different response structures
+      let historyData: any[] = []
+      
+      if (response.result && Array.isArray(response.result.data)) {
+        historyData = response.result.data
+      } else if (response.result && Array.isArray(response.result)) {
+        historyData = response.result
+      } else if (Array.isArray(response.data)) {
+        historyData = response.data
+      } else if (Array.isArray(response)) {
+        historyData = response
+      } else {
+        console.warn(`[OpinionClient] Unexpected price history response structure for token ${tokenId}:`, response)
+        return []
+      }
+
+      return historyData.map((point: any) => ({
         t: point.t || point.timestamp || 0,
         p: point.p || point.price || '0',
       }))
     } catch (error) {
-      // Requirement 6.2: Handle errors gracefully without application crash
-      console.error(`Failed to fetch price history for token ${tokenId}:`, error)
-      console.warn(`Using fallback price history for token ${tokenId}`)
-      return this.getFallbackPriceHistory(tokenId, interval)
+      console.error(`[OpinionClient] Failed to fetch price history for token ${tokenId}:`, error)
+      return []
     }
   }
 
   /**
    * Get user positions for a wallet address
    * Frontend-facing helper: returns [] on failure to avoid breaking UI flows
+   * 
+   * API Response structure:
+   * {
+   *   errmsg: string,
+   *   errno: number,
+   *   result: {
+   *     total: number,
+   *     list: Position[]
+   *   }
+   * }
    */
-  async getUserPositions(walletAddress: string): Promise<any[]> {
+  async getUserPositions(walletAddress: string): Promise<UserPosition[]> {
     try {
       const response = await this.makeRequest<any>(`/positions/user/${walletAddress}`)
 
-      if (!response || !Array.isArray(response.data)) {
+      // Handle Opinion API response structure: { errmsg, errno, result: { total, list } }
+      if (!response) {
+        console.warn(`[OpinionClient] Empty response for positions of ${walletAddress}`)
         return []
       }
 
-      return response.data
+      // Check for API-level errors
+      if (response.errno !== undefined && response.errno !== 0) {
+        console.warn(`[OpinionClient] API returned error for positions: errno=${response.errno}, errmsg=${response.errmsg || ''}`)
+        return []
+      }
+
+      // Extract positions from result.list
+      if (response.result && Array.isArray(response.result.list)) {
+        console.log(`[OpinionClient] Successfully fetched ${response.result.list.length} positions (total: ${response.result.total})`)
+        return response.result.list
+      }
+
+      // Fallback: try direct array or data property (for backwards compatibility)
+      if (Array.isArray(response)) {
+        return response
+      }
+
+      if (response.data && Array.isArray(response.data)) {
+        return response.data
+      }
+
+      console.warn(`[OpinionClient] Unexpected response structure for positions:`, response)
+      return []
     } catch (error) {
-      console.error(`Failed to fetch user positions for ${walletAddress}:`, error)
+      // Log detailed error information
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      console.error(`[OpinionClient] Failed to fetch user positions for ${walletAddress}:`, {
+        error: errorMessage,
+        endpoint: `/positions/user/${walletAddress}`,
+        baseUrl: this.baseUrl
+      })
+      
+      // Return empty array to keep UI functional
       return []
     }
   }
@@ -198,106 +300,6 @@ export class OpinionClient {
     return {
       circuitBreakerState: rateLimiter.getCircuitBreakerState()
     }
-  }
-
-  /**
-   * Fallback market data when API is unavailable
-   * Provides sample data for development and testing
-   */
-  private getFallbackMarkets(): Market[] {
-    const now = Math.floor(Date.now() / 1000)
-    const oneHour = 3600
-    const oneDay = 86400
-
-    return [
-      {
-        id: 1,
-        title: "Will Bitcoin reach $100,000 by end of 2024?",
-        yesTokenId: "btc-100k-yes",
-        noTokenId: "btc-100k-no", 
-        cutoffAt: now + oneDay * 30, // 30 days from now
-        status: "activated",
-        volume24h: "125000"
-      },
-      {
-        id: 2,
-        title: "Will Ethereum 2.0 launch successfully in Q1 2024?",
-        yesTokenId: "eth2-q1-yes",
-        noTokenId: "eth2-q1-no",
-        cutoffAt: now + oneDay * 15, // 15 days from now
-        status: "activated", 
-        volume24h: "87500"
-      },
-      {
-        id: 3,
-        title: "Will Tesla stock price exceed $300 this month?",
-        yesTokenId: "tsla-300-yes",
-        noTokenId: "tsla-300-no",
-        cutoffAt: now + oneDay * 7, // 7 days from now
-        status: "activated",
-        volume24h: "65000"
-      },
-      {
-        id: 4,
-        title: "Will AI achieve AGI breakthrough in 2024?",
-        yesTokenId: "agi-2024-yes", 
-        noTokenId: "agi-2024-no",
-        cutoffAt: now + oneHour * 6, // 6 hours from now
-        status: "activated",
-        volume24h: "45000"
-      },
-      {
-        id: 5,
-        title: "Will SpaceX successfully land on Mars in 2024?",
-        yesTokenId: "spacex-mars-yes",
-        noTokenId: "spacex-mars-no", 
-        cutoffAt: now + oneHour * 2, // 2 hours from now
-        status: "activated",
-        volume24h: "32000"
-      }
-    ]
-  }
-
-  /**
-   * Fallback price data when API is unavailable
-   */
-  private getFallbackPrice(tokenId: string): PriceData {
-    // Generate realistic price based on token ID
-    const basePrice = tokenId.includes('yes') ? 0.45 : 0.55
-    const variation = (Math.random() - 0.5) * 0.2 // ±10% variation
-    const price = Math.max(0.01, Math.min(0.99, basePrice + variation))
-
-    return {
-      tokenId,
-      price: price.toFixed(3),
-      timestamp: Date.now()
-    }
-  }
-
-  /**
-   * Fallback price history when API is unavailable
-   */
-  private getFallbackPriceHistory(tokenId: string, interval: string): PriceHistoryPoint[] {
-    const now = Math.floor(Date.now() / 1000)
-    const intervalSeconds = interval === '1h' ? 3600 : 86400
-    const points = interval === '1h' ? 24 : 30 // 24 hours or 30 days
-    
-    const history: PriceHistoryPoint[] = []
-    const basePrice = tokenId.includes('yes') ? 0.45 : 0.55
-    
-    for (let i = points; i >= 0; i--) {
-      const timestamp = now - (i * intervalSeconds)
-      const trend = (points - i) / points * 0.1 // Slight upward trend
-      const noise = (Math.random() - 0.5) * 0.05 // ±2.5% noise
-      const price = Math.max(0.01, Math.min(0.99, basePrice + trend + noise))
-      
-      history.push({
-        t: timestamp,
-        p: price.toFixed(3)
-      })
-    }
-    
-    return history
   }
 }
 

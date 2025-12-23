@@ -56,6 +56,32 @@ export interface PriceHistoryChart {
   noAsYesPrices: number[]
 }
 
+export interface UserPosition {
+  marketId: number
+  marketTitle: string
+  marketStatus: number
+  marketStatusEnum: string
+  marketCutoffAt: number
+  rootMarketId: number
+  rootMarketTitle: string
+  outcome: 'YES' | 'NO'
+  outcomeSide: number
+  outcomeSideEnum: 'Yes' | 'No'
+  sharesOwned: string
+  sharesFrozen: string
+  unrealizedPnl: string
+  unrealizedPnlPercent: string
+  dailyPnlChange: string
+  dailyPnlChangePercent: string
+  conditionId: string
+  tokenId: string
+  currentValueInQuoteToken: string
+  avgEntryPrice: string
+  claimStatus: number
+  claimStatusEnum: string
+  quoteToken: string
+}
+
 // Internal Processing Types
 export interface ProcessedMarket {
   market: Market

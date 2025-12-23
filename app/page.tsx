@@ -18,7 +18,7 @@ import {
 } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
-import type { ArbitrageOpportunity, EndingSoonMarket, MarketMover } from '@/lib/types'
+import type { ArbitrageOpportunity, EndingSoonMarket, MarketMover, UserPosition } from '@/lib/types'
 
 function cn(...classes: ClassValue[]) {
   return twMerge(clsx(classes))
@@ -110,7 +110,7 @@ function SkeletonList({ rows = 5 }: { rows?: number }) {
   )
 }
 
-function EmptyState({ label }: { label: string }) {
+function EmptyState({ label }: { label: ReactNode }) {
   return (
     <div className="rounded-xl bg-slate-900/40 p-6 text-sm text-slate-400 ring-1 ring-white/10">
       {label}
@@ -440,50 +440,89 @@ export default function Home() {
           <div className="p-4">
             {positions.isLoading ? <SkeletonList rows={3} /> : null}
             {positions.error ? (
-              <EmptyState label="Failed to load positions (showing nothing to keep the dashboard usable)." />
+              <EmptyState label="Failed to load positions. Check console for details. The positions endpoint may not be available in Opinion API." />
             ) : null}
             {!positions.isLoading && !positions.error && (positions.data?.length || 0) === 0 ? (
-              <EmptyState label="No positions returned for this wallet." />
+              <EmptyState label="No positions found for this wallet address." />
             ) : null}
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {(positions.data || []).slice(0, 12).map((p, idx) => {
-                const title = p?.marketTitle || p?.title || p?.market?.title || p?.marketId || p?.tokenId || `Position ${idx + 1}`
-                const side = p?.side || p?.positionSide || p?.outcome
-                const size = p?.size || p?.amount || p?.quantity
-                const avg = p?.avgPrice || p?.averagePrice
+              {(positions.data || []).slice(0, 12).map((p: UserPosition, idx) => {
+                const pnl = parseFloat(p.unrealizedPnl || '0')
+                const pnlPercent = parseFloat(p.unrealizedPnlPercent || '0')
+                const sharesOwned = parseFloat(p.sharesOwned || '0')
+                const currentValue = parseFloat(p.currentValueInQuoteToken || '0')
+                const avgPrice = parseFloat(p.avgEntryPrice || '0')
+                const isPositive = pnl >= 0
+                const outcomeColor = p.outcome === 'YES' ? 'text-emerald-300' : 'text-rose-300'
 
                 return (
                   <div
-                    key={p?.id || `${p?.tokenId || 'pos'}:${idx}`}
-                    className="rounded-xl bg-slate-900/40 p-4 ring-1 ring-white/10"
+                    key={p.tokenId || `${p.marketId}:${idx}`}
+                    className="rounded-xl bg-slate-900/40 p-4 ring-1 ring-white/10 hover:bg-slate-900/60 transition-colors"
                   >
-                    <div className="truncate text-sm font-semibold text-slate-100">{String(title)}</div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                      {side ? (
-                        <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                          Side {String(side)}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-semibold text-slate-100">
+                          {p.marketTitle || `Market ${p.marketId}`}
+                        </div>
+                        {p.rootMarketTitle ? (
+                          <div className="mt-1 text-xs text-slate-500 truncate">
+                            {p.rootMarketTitle}
+                          </div>
+                        ) : null}
+                      </div>
+                      <span className={`shrink-0 text-xs font-semibold ${outcomeColor}`}>
+                        {p.outcome}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <div className="text-slate-500">Shares</div>
+                        <div className="text-slate-200 font-mono">
+                          {sharesOwned.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">Current Value</div>
+                        <div className="text-slate-200 font-mono">
+                          ${currentValue.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">Avg Entry</div>
+                        <div className="text-slate-200 font-mono">
+                          {avgPrice.toFixed(4)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-500">P&L</div>
+                        <div className={`font-semibold font-mono ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {isPositive ? '+' : ''}${pnl.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex items-center justify-between">
+                      <div className="text-xs">
+                        <span className="text-slate-500">P&L: </span>
+                        <span className={`font-semibold ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {isPositive ? '+' : ''}{(pnlPercent * 100).toFixed(2)}%
                         </span>
-                      ) : null}
-                      {size ? (
-                        <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                          Size {String(size)}
-                        </span>
-                      ) : null}
-                      {avg ? (
-                        <span className="rounded-md bg-slate-900 px-2 py-1 ring-1 ring-white/10">
-                          Avg {String(avg)}
+                      </div>
+                      {p.sharesFrozen && parseFloat(p.sharesFrozen) > 0 ? (
+                        <span className="text-xs text-amber-400">
+                          🔒 {parseFloat(p.sharesFrozen).toLocaleString('en-US', { maximumFractionDigits: 0 })} frozen
                         </span>
                       ) : null}
                     </div>
-                    <details className="mt-3">
-                      <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-300">
-                        Raw payload
-                      </summary>
-                      <pre className="mt-2 max-h-44 overflow-auto rounded-lg bg-slate-950/60 p-3 text-[11px] text-slate-300 ring-1 ring-white/10">
-                        {JSON.stringify(p, null, 2)}
-                      </pre>
-                    </details>
+
+                    {p.marketCutoffAt ? (
+                      <div className="mt-2 text-xs text-slate-500">
+                        Cutoff: {new Date(p.marketCutoffAt * 1000).toLocaleDateString()}
+                      </div>
+                    ) : null}
                   </div>
                 )
               })}
