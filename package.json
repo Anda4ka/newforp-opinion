@@ -1,0 +1,30 @@
+{
+  "name": "prediction-markets-backend",
+  "version": "0.1.0",
+  "description": "Analytical backend for prediction markets using Opinion OpenAPI",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "test:properties": "vitest --run --reporter=verbose tests/properties"
+  },
+  "dependencies": {
+    "next": "14.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "eslint": "^8.0.0",
+    "eslint-config-next": "14.0.0",
+    "fast-check": "^3.15.0",
+    "typescript": "^5.0.0",
+    "vitest": "^1.0.0"
+  }
+}
