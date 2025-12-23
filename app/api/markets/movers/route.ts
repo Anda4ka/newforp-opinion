@@ -33,7 +33,7 @@ async function moversHandler(request: NextRequest): Promise<NextResponse> {
   }
 
   // Fetch fresh data with error handling
-  const markets = await opinionClient.getMarkets()
+  const { markets } = await opinionClient.getMarkets(1, 5) // Use volume24h desc for movers
   
   if (!markets || markets.length === 0) {
     console.warn('No markets available, returning empty array')

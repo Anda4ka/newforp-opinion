@@ -30,7 +30,7 @@ async function endingSoonHandler(request: NextRequest): Promise<NextResponse> {
   }
 
   // Requirement 3.1: Fetch markets and filter by time and status
-  const markets = await opinionClient.getMarkets()
+  const { markets } = await opinionClient.getMarkets(1, 2) // Use ending soon sort
   
   if (!markets || markets.length === 0) {
     console.warn('No markets available for ending-soon analysis, returning empty array')

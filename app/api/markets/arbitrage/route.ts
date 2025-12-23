@@ -24,7 +24,7 @@ async function arbitrageHandler(request: NextRequest): Promise<NextResponse> {
   }
 
   // Requirement 2.1: Fetch markets with arbitrage opportunities
-  const markets = await opinionClient.getMarkets()
+  const { markets } = await opinionClient.getMarkets(1, 3) // Use volume desc
   
   if (!markets || markets.length === 0) {
     console.warn('No markets available for arbitrage analysis, returning empty array')

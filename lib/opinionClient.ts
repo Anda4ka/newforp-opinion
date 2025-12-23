@@ -96,23 +96,24 @@ export class OpinionClient {
   }
 
   /**
-   * Get all available markets with rate limiting
+   * Get paginated markets with rate limiting
    * Maps Opinion API response to internal Market interface
    * Returns empty array on failure - no fallback data
    * 
-   * API Documentation: GET /market?status=activated&limit=20&sortBy=5
+   * API Documentation: GET /market?status=activated&limit=20&page=1&sortBy=3
    * Response: { code: 0, msg: "success", result: { total: number, list: Market[] } }
-   * sortBy: 5 = volume24h desc (according to API docs)
+   * sortBy: 3 = volume desc (default per requirements)
    */
-  async getMarkets(): Promise<Market[]> {
+  async getMarkets(page: number = 1, sortBy: number = 3): Promise<{ markets: Market[], total: number }> {
     try {
       // Use exponential backoff for critical requests
-      // sortBy=5 sorts by volume24h descending (per API documentation)
+      // sortBy=3 sorts by volume descending (default per requirements)
       const response = await ExponentialBackoff.executeWithBackoff(
         () => this.makeRequest<any>('/market', { 
           status: 'activated', 
           limit: '20',
-          sortBy: '5' // volume24h desc
+          page: String(page),
+          sortBy: String(sortBy)
         }),
         2, // Max 2 attempts
         1000 // 1 second base delay
@@ -152,9 +153,8 @@ export class OpinionClient {
         return []
       }
 
-      console.log(`[OpinionClient] Successfully parsed ${response.result.list.length} markets (total: ${response.result.total || 'unknown'})`)
-
-      return response.result.list.map((market: any) => ({
+      const total = response.result.total || 0
+      const markets = response.result.list.map((market: any) => ({
         id: market.marketId || market.id || 0,
         title: market.marketTitle || market.title || '',
         yesTokenId: market.yesTokenId || '',
@@ -163,9 +163,13 @@ export class OpinionClient {
         status: market.statusEnum || market.status || 'unknown',
         volume24h: market.volume24h || '0',
       }))
+
+      console.log(`[OpinionClient] Successfully parsed ${markets.length} markets (page ${page}, total: ${total})`)
+
+      return { markets, total }
     } catch (error) {
       console.error('[OpinionClient] Failed to fetch markets:', error)
-      return []
+      return { markets: [], total: 0 }
     }
   }
 

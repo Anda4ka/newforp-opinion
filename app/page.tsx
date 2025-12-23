@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import type { ClassValue } from 'clsx'
@@ -10,9 +10,10 @@ import {
   Activity,
   ArrowUpRight,
   LineChart as LineChartIcon,
-  TrendingUp,
   Wallet,
   X,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
@@ -71,28 +72,44 @@ function buildPlaceholderSeries(tokenId: string) {
   return data
 }
 
+interface MarketWithPrices {
+  id: number
+  title: string
+  yesTokenId: string
+  noTokenId: string
+  yesPrice: number
+  noPrice: number
+  volume24h: string
+  priceChangePct?: number
+  cutoffAt: number
+}
+
 function SkeletonCard() {
   return (
-    <div className="h-32 w-full animate-pulse rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10" />
+    <div className="h-40 w-full animate-pulse rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10" />
   )
 }
 
 function EmptyState({ label }: { label: ReactNode }) {
   return (
-    <div className="col-span-full flex h-32 items-center justify-center rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-6 text-sm text-slate-400">
+    <div className="col-span-full flex h-40 items-center justify-center rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-6 text-sm text-slate-400">
       {label}
     </div>
   )
 }
 
 function ChartModal({
-  mover,
+  market,
   onClose,
 }: {
-  mover: MarketMover
+  market: MarketWithPrices
   onClose: () => void
 }) {
-  const data = useMemo(() => buildPlaceholderSeries(mover.yesTokenId), [mover.yesTokenId])
+  // Use useMemo to prevent hydration mismatch - generate data on client side only
+  const data = useMemo(() => {
+    if (typeof window === 'undefined') return []
+    return buildPlaceholderSeries(market.yesTokenId)
+  }, [market.yesTokenId])
 
   return (
     <div
@@ -114,9 +131,9 @@ function ChartModal({
               <LineChartIcon className="h-5 w-5 text-slate-300" />
               <div className="text-base font-semibold text-slate-100">Price History</div>
             </div>
-            <div className="mt-1 truncate text-sm text-slate-400">{mover.marketTitle}</div>
+            <div className="mt-1 truncate text-sm text-slate-400">{market.title}</div>
             <div className="mt-1 text-xs text-slate-500">
-              Token: <span className="font-mono text-slate-400">{mover.yesTokenId.slice(0, 20)}…</span>
+              Token: <span className="font-mono text-slate-400">{market.yesTokenId.slice(0, 20)}…</span>
             </div>
           </div>
 
@@ -131,29 +148,31 @@ function ChartModal({
 
         <div className="p-6">
           <div className="h-[360px] rounded-xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data} margin={{ top: 16, right: 16, bottom: 8, left: 0 }}>
-                <XAxis dataKey="idx" hide />
-                <YAxis domain={[0, 1]} tick={{ fill: '#94a3b8', fontSize: 12 }} width={32} />
-                <Tooltip
-                  contentStyle={{
-                    background: 'rgba(15,23,42,0.95)',
-                    border: '1px solid rgba(255,255,255,0.10)',
-                    borderRadius: 12,
-                    color: '#e2e8f0',
-                  }}
-                  labelStyle={{ color: '#94a3b8' }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="price"
-                  stroke="#60a5fa"
-                  strokeWidth={2}
-                  dot={false}
-                  isAnimationActive={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {data.length > 0 && (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={data} margin={{ top: 16, right: 16, bottom: 8, left: 0 }}>
+                  <XAxis dataKey="idx" hide />
+                  <YAxis domain={[0, 1]} tick={{ fill: '#94a3b8', fontSize: 12 }} width={32} />
+                  <Tooltip
+                    contentStyle={{
+                      background: 'rgba(15,23,42,0.95)',
+                      border: '1px solid rgba(255,255,255,0.10)',
+                      borderRadius: 12,
+                      color: '#e2e8f0',
+                    }}
+                    labelStyle={{ color: '#94a3b8' }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="price"
+                    stroke="#60a5fa"
+                    strokeWidth={2}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
@@ -164,17 +183,50 @@ function ChartModal({
 export default function Home() {
   const [walletInput, setWalletInput] = useState('')
   const [watchedAddress, setWatchedAddress] = useState<string>('')
-  const [selectedMover, setSelectedMover] = useState<MarketMover | null>(null)
+  const [selectedMarket, setSelectedMarket] = useState<MarketWithPrices | null>(null)
+  const [page, setPage] = useState(1)
+  const [allMarkets, setAllMarkets] = useState<MarketWithPrices[]>([])
+  const [hasMore, setHasMore] = useState(true)
 
   const onWatch = useCallback(() => {
     setWatchedAddress(walletInput.trim())
   }, [walletInput])
 
-  const movers = useSWR<MarketMover[]>(
-    '/api/markets/movers?timeframe=24h',
+  // Fetch markets with pagination
+  const { data: marketsData, error: marketsError, isLoading: marketsLoading } = useSWR<{
+    markets: MarketWithPrices[]
+    total: number
+  }>(
+    `/api/markets/list?page=${page}`,
     fetcher,
     { refreshInterval: 30_000, revalidateOnFocus: false }
   )
+
+  // Update allMarkets when new data arrives
+  useEffect(() => {
+    if (marketsData?.markets) {
+      if (page === 1) {
+        // Reset on first page
+        setAllMarkets(marketsData.markets)
+        // Check if there are more pages
+        setHasMore(marketsData.markets.length === 20 && marketsData.markets.length < marketsData.total)
+      } else {
+        // Append new markets
+        setAllMarkets(prev => {
+          const updated = [...prev, ...marketsData.markets]
+          // Check if there are more pages
+          setHasMore(marketsData.markets.length === 20 && updated.length < marketsData.total)
+          return updated
+        })
+      }
+    }
+  }, [marketsData, page])
+
+  const loadMore = useCallback(() => {
+    if (!marketsLoading && hasMore) {
+      setPage(prev => prev + 1)
+    }
+  }, [marketsLoading, hasMore])
 
   const positions = useSWR<UserPosition[]>(
     watchedAddress ? `/api/user/positions?address=${encodeURIComponent(watchedAddress)}` : null,
@@ -184,7 +236,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-950">
-      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[1920px] px-4 py-8 sm:px-6 lg:px-8">
         {/* Header */}
         <header className="mb-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -193,10 +245,10 @@ export default function Home() {
                 <Activity className="h-6 w-6 text-slate-300" />
                 <div>
                   <h1 className="text-2xl font-semibold tracking-tight text-slate-100">
-                    Prediction Markets Dashboard
+                    Market Explorer
                   </h1>
                   <p className="mt-1 text-sm text-slate-400">
-                    Track market movers and monitor wallet positions
+                    Browse all active prediction markets
                   </p>
                 </div>
               </div>
@@ -226,73 +278,102 @@ export default function Home() {
           </div>
         </header>
 
-        {/* Top Movers Section */}
+        {/* Markets Grid - Full Width */}
         <section className="mb-8">
-          <div className="mb-4 flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-slate-300" />
-            <h2 className="text-lg font-semibold text-slate-100">Top Movers</h2>
-            <span className="text-sm text-slate-400">Biggest 24h market-price changes</span>
-          </div>
-
-          {movers.isLoading ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <SkeletonCard key={i} />
+          {marketsLoading && page === 1 ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <SkeletonCard key={`skeleton-${i}`} />
               ))}
             </div>
-          ) : movers.error ? (
-            <EmptyState label="Failed to load movers. Please try again later." />
-          ) : (movers.data?.length || 0) === 0 ? (
-            <EmptyState label="No mover data available." />
+          ) : marketsError ? (
+            <EmptyState label="Failed to load markets. Please try again later." />
+          ) : allMarkets.length === 0 ? (
+            <EmptyState label="No markets available." />
           ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
-              {(movers.data || []).map((m) => {
-                const positive = m.priceChangePct >= 0
-                return (
-                  <button
-                    key={m.marketId}
-                    onClick={() => setSelectedMover(m)}
-                    className="group relative overflow-hidden rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-5 text-left transition-all hover:ring-white/20 hover:bg-slate-900/50"
-                  >
-                    {/* Market Title - Top */}
-                    <div className="mb-4">
-                      <div className="line-clamp-2 text-sm font-semibold text-slate-100 group-hover:text-white transition-colors">
-                        {m.marketTitle}
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {allMarkets.map((market) => {
+                  // Calculate price change if possible (simplified - could be enhanced with historical data)
+                  const hasTrending = market.priceChangePct !== undefined
+                  const isPositive = market.priceChangePct !== undefined && market.priceChangePct >= 0
+                  
+                  return (
+                    <button
+                      key={`market-${market.id}`}
+                      onClick={() => setSelectedMarket(market)}
+                      className="group relative overflow-hidden rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-5 text-left transition-all hover:ring-white/20 hover:bg-slate-900/50"
+                    >
+                      {/* Market Title - Top */}
+                      <div className="mb-4">
+                        <div className="line-clamp-2 text-sm font-semibold text-slate-100 group-hover:text-white transition-colors">
+                          {market.title || `Market ${market.id}`}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Prices and Change - Bottom as Tags */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                        YES {m.yesPrice.toFixed(3)}
-                      </span>
-                      <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                        NO {m.noPrice.toFixed(3)}
-                      </span>
-                      <span
-                        className={cn(
-                          'rounded-lg px-2.5 py-1 text-xs font-bold ring-1',
-                          positive
-                            ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
-                            : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
+                      {/* Prices and Info - Bottom as Tags */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                          YES {market.yesPrice.toFixed(3)}
+                        </span>
+                        <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                          NO {market.noPrice.toFixed(3)}
+                        </span>
+                        {hasTrending && (
+                          <span
+                            className={cn(
+                              'rounded-lg px-2.5 py-1 text-xs font-bold ring-1 flex items-center gap-1',
+                              isPositive
+                                ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
+                                : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
+                            )}
+                          >
+                            {isPositive ? (
+                              <TrendingUp className="h-3 w-3" />
+                            ) : (
+                              <TrendingDown className="h-3 w-3" />
+                            )}
+                            {formatPct(market.priceChangePct!)}
+                          </span>
                         )}
-                      >
-                        {formatPct(m.priceChangePct)}
-                      </span>
-                      <span className="ml-auto rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-400 ring-1 ring-white/5">
-                        ${formatUsdCompact(Number(m.volume24h) || 0)}
-                      </span>
-                    </div>
+                        <span className="ml-auto rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-400 ring-1 ring-white/5">
+                          ${formatUsdCompact(Number(market.volume24h) || 0)}
+                        </span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {/* Load More Button */}
+              {hasMore && (
+                <div className="mt-8 flex justify-center">
+                  <button
+                    onClick={loadMore}
+                    disabled={marketsLoading}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800/60 backdrop-blur-sm px-6 py-3 text-sm font-semibold text-slate-200 ring-1 ring-white/10 hover:bg-slate-800/80 hover:ring-white/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    {marketsLoading ? (
+                      <>
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent" />
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        Load More
+                        <ArrowUpRight className="h-4 w-4" />
+                      </>
+                    )}
                   </button>
-                )
-              })}
-            </div>
+                </div>
+              )}
+            </>
           )}
         </section>
 
-        {/* User Positions Section */}
+        {/* User Positions Section - Only if wallet is watched */}
         {watchedAddress && (
-          <section>
+          <section className="mt-12">
             <div className="mb-4 flex items-center gap-2">
               <Wallet className="h-5 w-5 text-slate-300" />
               <h2 className="text-lg font-semibold text-slate-100">User Positions</h2>
@@ -302,9 +383,9 @@ export default function Home() {
             </div>
 
             {positions.isLoading ? (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {Array.from({ length: 4 }).map((_, i) => (
-                  <SkeletonCard key={i} />
+                  <SkeletonCard key={`position-skeleton-${i}`} />
                 ))}
               </div>
             ) : positions.error ? (
@@ -312,19 +393,18 @@ export default function Home() {
             ) : (positions.data?.length || 0) === 0 ? (
               <EmptyState label="No positions found for this wallet address." />
             ) : (
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {(positions.data || []).map((p: UserPosition, idx) => {
                   const pnl = parseFloat(p.unrealizedPnl || '0')
                   const pnlPercent = parseFloat(p.unrealizedPnlPercent || '0')
                   const sharesOwned = parseFloat(p.sharesOwned || '0')
                   const currentValue = parseFloat(p.currentValueInQuoteToken || '0')
-                  const avgPrice = parseFloat(p.avgEntryPrice || '0')
                   const isPositive = pnl >= 0
                   const outcomeColor = p.outcome === 'YES' ? 'text-emerald-300' : 'text-rose-300'
 
                   return (
                     <div
-                      key={p.tokenId || `${p.marketId}:${idx}`}
+                      key={`position-${p.tokenId || p.marketId || idx}`}
                       className="group relative overflow-hidden rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-5 transition-all hover:ring-white/20 hover:bg-slate-900/50"
                     >
                       {/* Market Title - Top */}
@@ -332,7 +412,7 @@ export default function Home() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="line-clamp-2 text-sm font-semibold text-slate-100">
-                              {p.marketTitle || `Market ${p.marketId}`}
+                              {p.marketTitle || `Market ${p.marketId || idx}`}
                             </div>
                             {p.rootMarketTitle && (
                               <div className="mt-1 line-clamp-1 text-xs text-slate-500">
@@ -341,7 +421,7 @@ export default function Home() {
                             )}
                           </div>
                           <span className={`shrink-0 text-xs font-bold ${outcomeColor}`}>
-                            {p.outcome}
+                            {p.outcome || 'N/A'}
                           </span>
                         </div>
                       </div>
@@ -376,7 +456,7 @@ export default function Home() {
                         </span>
                         {p.sharesFrozen && parseFloat(p.sharesFrozen) > 0 && (
                           <span className="rounded-lg bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300 ring-1 ring-amber-500/20">
-                            🔒 {parseFloat(p.sharesFrozen).toLocaleString('en-US', { maximumFractionDigits: 0 })} frozen
+                            🔒 {parseFloat(p.sharesFrozen).toLocaleString('en-US', { maximumFractionDigits: 0 })}
                           </span>
                         )}
                       </div>
@@ -389,7 +469,7 @@ export default function Home() {
         )}
       </div>
 
-      {selectedMover ? <ChartModal mover={selectedMover} onClose={() => setSelectedMover(null)} /> : null}
+      {selectedMarket ? <ChartModal market={selectedMarket} onClose={() => setSelectedMarket(null)} /> : null}
     </main>
   )
 }

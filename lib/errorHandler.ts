@@ -92,6 +92,38 @@ export class InputValidator {
   }
 
   /**
+   * Validate page parameter for pagination
+   */
+  static validatePage(pageParam: string | null): number {
+    if (pageParam === null) {
+      return 1 // Default value
+    }
+
+    const sanitized = pageParam.trim()
+    
+    // Require a strict integer
+    if (!/^\d+$/.test(sanitized)) {
+      throw new APIError(
+        'Invalid page parameter. Must be a positive integer',
+        ErrorType.VALIDATION,
+        400
+      )
+    }
+
+    const page = parseInt(sanitized, 10)
+    
+    if (isNaN(page) || page < 1 || page > 1000) { // Reasonable max
+      throw new APIError(
+        'Invalid page parameter. Must be between 1 and 1000',
+        ErrorType.VALIDATION,
+        400
+      )
+    }
+    
+    return page
+  }
+
+  /**
    * Validate interval parameter for price history
    */
   static validateInterval(interval: string | null): string {
