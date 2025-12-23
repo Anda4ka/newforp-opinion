@@ -27,6 +27,7 @@ export class OpinionClient {
     // Ensure endpoint starts with / for proper URL construction
     const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
     // Base URL already includes /openapi, so we append the endpoint
+    // Example: https://openapi.opinion.trade/openapi + /market = https://openapi.opinion.trade/openapi/market
     const url = new URL(this.baseUrl + normalizedEndpoint)
     
     // Add query parameters if provided
@@ -45,7 +46,10 @@ export class OpinionClient {
       const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
       try {
-        const response = await fetch(url.toString(), {
+        const fullUrl = url.toString()
+        console.log(`[OpinionClient] Making request to: ${fullUrl}`)
+        
+        const response = await fetch(fullUrl, {
           method: 'GET',
           headers: {
             'apikey': this.apiKey,
@@ -64,10 +68,17 @@ export class OpinionClient {
             const delay = retryAfter ? parseInt(retryAfter) * 1000 : 5000
             throw new Error(`Rate limit exceeded (429). Retry after ${delay}ms`)
           }
+          const errorText = await response.text().catch(() => '')
+          console.error(`[OpinionClient] HTTP error ${response.status}: ${errorText}`)
           throw new Error(`Opinion API error: ${response.status} ${response.statusText}`)
         }
 
         const data = await response.json()
+        console.log(`[OpinionClient] Response received for ${endpoint}:`, {
+          code: data.code,
+          hasResult: !!data.result,
+          resultType: data.result ? typeof data.result : 'none'
+        })
         return data
       } catch (error) {
         clearTimeout(timeoutId)
@@ -107,23 +118,41 @@ export class OpinionClient {
         1000 // 1 second base delay
       )
       
-      // Handle Opinion API response structure: { code: 0, result: { list: Market[] } }
+      // Handle Opinion API response structure: { code: 0, msg: "success", result: { total: number, list: Market[] } }
       if (!response) {
         console.warn('[OpinionClient] Empty response for markets')
         return []
       }
 
-      // Check for API-level errors (code !== 0 means error)
+      // Check for API-level errors (code !== 0 means error per API documentation)
+      // Some responses may not have code field, so we check if it exists and is non-zero
       if (response.code !== undefined && response.code !== 0) {
-        console.warn(`[OpinionClient] API returned error for markets: code=${response.code}, errmsg=${response.errmsg || ''}`)
+        console.warn(`[OpinionClient] API returned error for markets: code=${response.code}, msg=${response.msg || response.errmsg || ''}`)
+        return []
+      }
+      
+      // Also check errno field (used by some endpoints like positions)
+      if (response.errno !== undefined && response.errno !== 0) {
+        console.warn(`[OpinionClient] API returned error for markets: errno=${response.errno}, errmsg=${response.errmsg || ''}`)
         return []
       }
 
       // Data is in result.list according to documentation
-      if (!response.result || !Array.isArray(response.result.list)) {
-        console.warn('[OpinionClient] Unexpected markets response structure:', response)
+      if (!response.result) {
+        console.warn('[OpinionClient] No result field in markets response:', response)
         return []
       }
+
+      if (!Array.isArray(response.result.list)) {
+        console.warn('[OpinionClient] result.list is not an array:', {
+          result: response.result,
+          resultType: typeof response.result,
+          listType: typeof response.result.list
+        })
+        return []
+      }
+
+      console.log(`[OpinionClient] Successfully parsed ${response.result.list.length} markets (total: ${response.result.total || 'unknown'})`)
 
       return response.result.list.map((market: any) => ({
         id: market.marketId || market.id || 0,
@@ -158,23 +187,28 @@ export class OpinionClient {
         return { tokenId, price: '0', timestamp: Date.now() }
       }
 
-      // Check for API-level errors (code !== 0 means error)
+      // Check for API-level errors (code !== 0 means error per API documentation)
       if (response.code !== undefined && response.code !== 0) {
-        console.warn(`[OpinionClient] API returned error for token ${tokenId} price: code=${response.code}, errmsg=${response.errmsg || ''}`)
+        console.warn(`[OpinionClient] API returned error for token ${tokenId} price: code=${response.code}, msg=${response.msg || response.errmsg || ''}`)
         return { tokenId, price: '0', timestamp: Date.now() }
       }
 
-      // Data is in result according to documentation
+      // Data is in result according to documentation: { code: 0, result: { tokenId, price, side, size, timestamp } }
       if (!response.result) {
-        console.warn(`[OpinionClient] Unexpected price response structure for token ${tokenId}:`, response)
+        console.warn(`[OpinionClient] No result field in price response for token ${tokenId}:`, response)
         return { tokenId, price: '0', timestamp: Date.now() }
       }
 
       const priceData = response.result
+      const parsedPrice = priceData.price || '0'
+      const parsedTimestamp = priceData.timestamp || Date.now()
+      
+      console.log(`[OpinionClient] Successfully fetched price for token ${tokenId}: ${parsedPrice} at ${new Date(parsedTimestamp).toISOString()}`)
+      
       return {
         tokenId: priceData.tokenId || tokenId,
-        price: priceData.price || '0',
-        timestamp: priceData.timestamp || Date.now(),
+        price: parsedPrice,
+        timestamp: parsedTimestamp,
       }
     } catch (error) {
       console.error(`[OpinionClient] Failed to fetch price for token ${tokenId}:`, error)
@@ -203,17 +237,27 @@ export class OpinionClient {
         return []
       }
 
-      // Check for API-level errors (code !== 0 means error)
+      // Check for API-level errors (code !== 0 means error per API documentation)
       if (response.code !== undefined && response.code !== 0) {
-        console.warn(`[OpinionClient] API returned error for token ${tokenId} price history: code=${response.code}, errmsg=${response.errmsg || ''}`)
+        console.warn(`[OpinionClient] API returned error for token ${tokenId} price history: code=${response.code}, msg=${response.msg || response.errmsg || ''}`)
         return []
       }
 
-      // Data is in result.history according to documentation
-      if (!response.result || !Array.isArray(response.result.history)) {
-        console.warn(`[OpinionClient] Unexpected price history response structure for token ${tokenId}:`, response)
+      // Data is in result.history according to documentation: { code: 0, result: { history: [{ t, p }] } }
+      if (!response.result) {
+        console.warn(`[OpinionClient] No result field in price history response for token ${tokenId}:`, response)
         return []
       }
+
+      if (!Array.isArray(response.result.history)) {
+        console.warn(`[OpinionClient] result.history is not an array for token ${tokenId}:`, {
+          result: response.result,
+          historyType: typeof response.result.history
+        })
+        return []
+      }
+
+      console.log(`[OpinionClient] Successfully fetched ${response.result.history.length} price history points for token ${tokenId}`)
 
       return response.result.history.map((point: any) => ({
         t: point.t || point.timestamp || 0,
