@@ -1,13 +1,13 @@
 # Dependencies
-node_modules/
+node_modules
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
 # Next.js
-.next/
-out/
-build/
+.next
+out
+build
 
 # Environment variables
 .env
@@ -17,8 +17,8 @@ build/
 .env.production.local
 
 # IDE
-.vscode/
-.idea/
+.vscode
+.idea
 *.swp
 *.swo
 
@@ -26,15 +26,20 @@ build/
 .DS_Store
 Thumbs.db
 
+# Git
+.git
+.gitignore
+
 # Testing
-coverage/
+coverage
+tests
 
 # TypeScript
 *.tsbuildinfo
 
 # Misc
 *.log
-.cache/
-.kiro/
-*.md
-.tests/
+.cache
+README.md
+.kiro
+railway.json
