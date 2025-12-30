@@ -29,7 +29,7 @@ export class OpinionClient {
     // Base URL already includes /openapi, so we append the endpoint
     // Example: https://openapi.opinion.trade/openapi + /market = https://openapi.opinion.trade/openapi/market
     const url = new URL(this.baseUrl + normalizedEndpoint)
-    
+
     // Add query parameters if provided
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
@@ -48,7 +48,7 @@ export class OpinionClient {
       try {
         const fullUrl = url.toString()
         console.log(`[OpinionClient] Making request to: ${fullUrl}`)
-        
+
         const response = await fetch(fullUrl, {
           method: 'GET',
           headers: {
@@ -82,7 +82,7 @@ export class OpinionClient {
         return data
       } catch (error) {
         clearTimeout(timeoutId)
-        
+
         // Requirement 6.2: Handle responses with missing data gracefully
         if (error instanceof Error) {
           if (error.name === 'AbortError') {
@@ -104,21 +104,21 @@ export class OpinionClient {
    * Response: { code: 0, msg: "success", result: { total: number, list: Market[] } }
    * sortBy: 3 = volume desc (default per requirements)
    */
-  async getMarkets(page: number = 1, sortBy: number = 3): Promise<{ markets: Market[], total: number }> {
+  async getMarkets(page: number = 1, sortBy: number = 3, limit: number = 50): Promise<{ markets: Market[], total: number }> {
     try {
       // Use exponential backoff for critical requests
       // sortBy=3 sorts by volume descending (default per requirements)
       const response = await ExponentialBackoff.executeWithBackoff(
-        () => this.makeRequest<any>('/market', { 
-          status: 'activated', 
-          limit: '20',
+        () => this.makeRequest<any>('/market', {
+          status: 'activated',
+          limit: String(limit),
           page: String(page),
           sortBy: String(sortBy)
         }),
         2, // Max 2 attempts
         1000 // 1 second base delay
       )
-      
+
       // Handle Opinion API response structure: { code: 0, msg: "success", result: { total: number, list: Market[] } }
       if (!response) {
         console.warn('[OpinionClient] Empty response for markets')
@@ -131,7 +131,7 @@ export class OpinionClient {
         console.warn(`[OpinionClient] API returned error for markets: code=${response.code}, msg=${response.msg || response.errmsg || ''}`)
         return { markets: [], total: 0 }
       }
-      
+
       // Also check errno field (used by some endpoints like positions)
       if (response.errno !== undefined && response.errno !== 0) {
         console.warn(`[OpinionClient] API returned error for markets: errno=${response.errno}, errmsg=${response.errmsg || ''}`)
@@ -162,6 +162,25 @@ export class OpinionClient {
         cutoffAt: market.cutoffAt || 0,
         status: market.statusEnum || market.status || 'unknown',
         volume24h: market.volume24h || '0',
+        marketType: market.marketType || 0,
+        questionId: market.questionId,
+        rules: market.rules,
+        yesLabel: market.yesLabel,
+        noLabel: market.noLabel,
+        childMarkets: market.childMarkets ? market.childMarkets.map((cm: any) => ({
+          id: cm.marketId,
+          title: cm.marketTitle,
+          yesTokenId: cm.yesTokenId,
+          noTokenId: cm.noTokenId,
+          cutoffAt: cm.cutoffAt,
+          status: cm.statusEnum,
+          volume24h: cm.volume,
+          marketType: 0, // Child markets are effectively binary
+          questionId: cm.questionId,
+          rules: cm.rules,
+          yesLabel: cm.yesLabel,
+          noLabel: cm.noLabel
+        })) : []
       }))
 
       console.log(`[OpinionClient] Successfully parsed ${markets.length} markets (page ${page}, total: ${total})`)
@@ -185,10 +204,15 @@ export class OpinionClient {
     try {
       // Fix: Use correct endpoint /token/latest-price?token_id={id}
       const response = await this.makeRequest<any>('/token/latest-price', { token_id: tokenId })
-      
+
       if (!response) {
         console.warn(`[OpinionClient] Empty response for token ${tokenId} price`)
         return { tokenId, price: '0', timestamp: Date.now() }
+      }
+
+      // Checking for price=0 case specifically
+      if (response && response.result && (response.result.price === '0' || response.result.price === 0)) {
+        console.log(`[OpinionClient] Token ${tokenId} has explicit 0 price from API.`)
       }
 
       // Check for API-level errors (code !== 0 means error per API documentation)
@@ -206,9 +230,9 @@ export class OpinionClient {
       const priceData = response.result
       const parsedPrice = priceData.price || '0'
       const parsedTimestamp = priceData.timestamp || Date.now()
-      
+
       console.log(`[OpinionClient] Successfully fetched price for token ${tokenId}: ${parsedPrice} at ${new Date(parsedTimestamp).toISOString()}`)
-      
+
       return {
         tokenId: priceData.tokenId || tokenId,
         price: parsedPrice,
@@ -231,11 +255,11 @@ export class OpinionClient {
   async getPriceHistory(tokenId: string, interval: string = '1h'): Promise<PriceHistoryPoint[]> {
     try {
       // Fix: Use correct endpoint /token/price-history?token_id={id}&interval={1h|1d}
-      const response = await this.makeRequest<any>('/token/price-history', { 
+      const response = await this.makeRequest<any>('/token/price-history', {
         token_id: tokenId,
         interval: interval
       })
-      
+
       if (!response) {
         console.warn(`[OpinionClient] Empty response for token ${tokenId} price history`)
         return []
@@ -335,7 +359,7 @@ export class OpinionClient {
         endpoint: `/positions/user/${walletAddress}`,
         baseUrl: this.baseUrl
       })
-      
+
       // Return empty array to keep UI functional
       return []
     }
@@ -347,6 +371,83 @@ export class OpinionClient {
   getRateLimiterStatus(): { circuitBreakerState: string } {
     return {
       circuitBreakerState: rateLimiter.getCircuitBreakerState()
+    }
+  }
+  /**
+   * Get detailed market information
+   * Handles both Binary and Categorical markets based on isCategorical flag
+   */
+  async getMarketDetail(marketId: number, isCategorical: boolean = false): Promise<Market | null> {
+    try {
+      const endpoint = isCategorical
+        ? `/market/categorical/${marketId}`
+        : `/market/${marketId}`
+
+      const response = await this.makeRequest<any>(endpoint)
+
+      if (!response || !response.result || !response.result.data) {
+        console.warn(`[OpinionClient] Empty response for market detail ${marketId}. Raw:`, JSON.stringify(response))
+        return null
+      }
+
+      const data = response.result.data
+
+      return {
+        id: data.marketId || data.id || 0,
+        title: data.marketTitle || data.title || '',
+        yesTokenId: data.yesTokenId || '',
+        noTokenId: data.noTokenId || '',
+        cutoffAt: data.cutoffAt || 0,
+        status: data.statusEnum || data.status || 'unknown',
+        volume24h: data.volume24h || '0',
+        marketType: data.marketType || (isCategorical ? 1 : 0),
+        questionId: data.questionId,
+        rules: data.rules,
+        yesLabel: data.yesLabel,
+        noLabel: data.noLabel,
+        childMarkets: data.childMarkets ? data.childMarkets.map((cm: any) => ({
+          id: cm.marketId,
+          title: cm.marketTitle,
+          yesTokenId: cm.yesTokenId,
+          noTokenId: cm.noTokenId,
+          cutoffAt: cm.cutoffAt,
+          status: cm.statusEnum,
+          volume24h: cm.volume,
+          marketType: 0,
+          questionId: cm.questionId,
+          rules: cm.rules,
+          yesLabel: cm.yesLabel,
+          noLabel: cm.noLabel
+        })) : []
+      }
+    } catch (error) {
+      console.error(`[OpinionClient] Failed to fetch market detail for ${marketId}:`, error)
+      return null
+    }
+  }
+
+  /**
+   * Get orderbook for a specific token
+   */
+  async getOrderbook(tokenId: string): Promise<import('./types').Orderbook | null> {
+    try {
+      const response = await this.makeRequest<any>('/token/orderbook', { token_id: tokenId })
+
+      if (!response || !response.result) {
+        console.warn(`[OpinionClient] Empty response for orderbook ${tokenId}`)
+        return null
+      }
+
+      return {
+        market: response.result.market,
+        tokenId: response.result.tokenId,
+        timestamp: response.result.timestamp,
+        bids: Array.isArray(response.result.bids) ? response.result.bids : [],
+        asks: Array.isArray(response.result.asks) ? response.result.asks : []
+      }
+    } catch (error) {
+      console.error(`[OpinionClient] Failed to fetch orderbook for ${tokenId}:`, error)
+      return null
     }
   }
 }

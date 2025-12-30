@@ -82,6 +82,8 @@ interface MarketWithPrices {
   volume24h: string
   priceChangePct?: number
   cutoffAt: number
+  marketType: number
+  childMarkets?: any[] // Simplified for UI
 }
 
 function SkeletonCard() {
@@ -183,10 +185,32 @@ function ChartModal({
 export default function Home() {
   const [walletInput, setWalletInput] = useState('')
   const [watchedAddress, setWatchedAddress] = useState<string>('')
-  const [selectedMarket, setSelectedMarket] = useState<MarketWithPrices | null>(null)
+  // selectedMarket state removed as we navigate to new page
   const [page, setPage] = useState(1)
   const [allMarkets, setAllMarkets] = useState<MarketWithPrices[]>([])
   const [hasMore, setHasMore] = useState(true)
+
+  // Search and Filter State
+  const [searchQuery, setSearchQuery] = useState('')
+  const [filterType, setFilterType] = useState<'ALL' | 'BINARY' | 'CATEGORICAL'>('ALL')
+
+  // Derived filtered markets
+  const filteredMarkets = useMemo(() => {
+    return allMarkets.filter(market => {
+      // 1. Search Filter
+      const matchesSearch = market.title.toLowerCase().includes(searchQuery.toLowerCase())
+
+      // 2. Type Filter
+      // Improved logic: If marketType is 1 OR has childMarkets, treat as Categorical
+      const isCategorical = market.marketType === 1 || (market.childMarkets && market.childMarkets.length > 0)
+      const matchesType =
+        filterType === 'ALL' ? true :
+          filterType === 'CATEGORICAL' ? isCategorical :
+            !isCategorical // BINARY
+
+      return matchesSearch && matchesType
+    })
+  }, [allMarkets, searchQuery, filterType])
 
   const onWatch = useCallback(() => {
     setWatchedAddress(walletInput.trim())
@@ -209,13 +233,13 @@ export default function Home() {
         // Reset on first page
         setAllMarkets(marketsData.markets)
         // Check if there are more pages
-        setHasMore(marketsData.markets.length === 20 && marketsData.markets.length < marketsData.total)
+        setHasMore(marketsData.markets.length === 50 && marketsData.markets.length < marketsData.total)
       } else {
         // Append new markets
         setAllMarkets(prev => {
           const updated = [...prev, ...marketsData.markets]
           // Check if there are more pages
-          setHasMore(marketsData.markets.length === 20 && updated.length < marketsData.total)
+          setHasMore(marketsData.markets.length === 50 && updated.length < marketsData.total)
           return updated
         })
       }
@@ -276,10 +300,46 @@ export default function Home() {
               </button>
             </div>
           </div>
-        </header>
+
+
+          {/* Search and Filter Controls */}
+          <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center">
+            {/* Search */}
+            <div className="relative flex-1">
+              <div className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-search"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></svg>
+              </div>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search markets..."
+                className="w-full rounded-xl bg-slate-900/60 ring-1 ring-white/10 py-2.5 pl-10 pr-4 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              />
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="flex rounded-xl bg-slate-900/60 p-1 ring-1 ring-white/10">
+              {(['ALL', 'BINARY', 'CATEGORICAL'] as const).map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setFilterType(type)}
+                  className={cn(
+                    "px-4 py-1.5 text-xs font-semibold rounded-lg transition-all",
+                    filterType === type
+                      ? "bg-slate-700 text-white shadow-sm"
+                      : "text-slate-400 hover:text-slate-200"
+                  )}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+        </header >
 
         {/* Markets Grid - Full Width */}
-        <section className="mb-8">
+        < section className="mb-8" >
           {marketsLoading && page === 1 ? (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {Array.from({ length: 8 }).map((_, i) => (
@@ -293,19 +353,29 @@ export default function Home() {
           ) : (
             <>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {allMarkets.map((market) => {
+                {filteredMarkets.map((market) => {
                   // Calculate price change if possible (simplified - could be enhanced with historical data)
                   const hasTrending = market.priceChangePct !== undefined
                   const isPositive = market.priceChangePct !== undefined && market.priceChangePct >= 0
-                  
+
+                  // Improved Categorical Detection for Badge
+                  const isCategorical = market.marketType === 1 || (market.childMarkets && market.childMarkets.length > 0)
+
                   return (
-                    <button
+                    <a
                       key={`market-${market.id}`}
-                      onClick={() => setSelectedMarket(market)}
-                      className="group relative overflow-hidden rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-5 text-left transition-all hover:ring-white/20 hover:bg-slate-900/50"
+                      href={`/market/${market.id}?type=${isCategorical ? 1 : 0}`}
+                      className="group relative overflow-hidden rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-5 text-left transition-all hover:ring-white/20 hover:bg-slate-900/50 block"
                     >
                       {/* Market Title - Top */}
                       <div className="mb-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          {isCategorical ? (
+                            <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-400 ring-1 ring-blue-500/20">CATEGORICAL</span>
+                          ) : (
+                            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 ring-1 ring-emerald-500/20">BINARY</span>
+                          )}
+                        </div>
                         <div className="line-clamp-2 text-sm font-semibold text-slate-100 group-hover:text-white transition-colors">
                           {market.title || `Market ${market.id}`}
                         </div>
@@ -313,12 +383,21 @@ export default function Home() {
 
                       {/* Prices and Info - Bottom as Tags */}
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                          YES {market.yesPrice.toFixed(3)}
-                        </span>
-                        <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                          NO {market.noPrice.toFixed(3)}
-                        </span>
+                        {!isCategorical ? (
+                          <>
+                            <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                              YES {market.yesPrice.toFixed(2)}
+                            </span>
+                            <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                              NO {market.noPrice.toFixed(2)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                            View Outcomes &rarr;
+                          </span>
+                        )}
+
                         {hasTrending && (
                           <span
                             className={cn(
@@ -340,7 +419,7 @@ export default function Home() {
                           ${formatUsdCompact(Number(market.volume24h) || 0)}
                         </span>
                       </div>
-                    </button>
+                    </a>
                   )
                 })}
               </div>
@@ -368,108 +447,109 @@ export default function Home() {
                 </div>
               )}
             </>
-          )}
-        </section>
+          )
+          }
+        </section >
 
         {/* User Positions Section - Only if wallet is watched */}
-        {watchedAddress && (
-          <section className="mt-12">
-            <div className="mb-4 flex items-center gap-2">
-              <Wallet className="h-5 w-5 text-slate-300" />
-              <h2 className="text-lg font-semibold text-slate-100">User Positions</h2>
-              <span className="text-sm text-slate-400 font-mono">
-                {watchedAddress.slice(0, 8)}…{watchedAddress.slice(-6)}
-              </span>
-            </div>
-
-            {positions.isLoading ? (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <SkeletonCard key={`position-skeleton-${i}`} />
-                ))}
+        {
+          watchedAddress && (
+            <section className="mt-12">
+              <div className="mb-4 flex items-center gap-2">
+                <Wallet className="h-5 w-5 text-slate-300" />
+                <h2 className="text-lg font-semibold text-slate-100">User Positions</h2>
+                <span className="text-sm text-slate-400 font-mono">
+                  {watchedAddress.slice(0, 8)}…{watchedAddress.slice(-6)}
+                </span>
               </div>
-            ) : positions.error ? (
-              <EmptyState label="Failed to load positions. Check console for details." />
-            ) : (positions.data?.length || 0) === 0 ? (
-              <EmptyState label="No positions found for this wallet address." />
-            ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {(positions.data || []).map((p: UserPosition, idx) => {
-                  const pnl = parseFloat(p.unrealizedPnl || '0')
-                  const pnlPercent = parseFloat(p.unrealizedPnlPercent || '0')
-                  const sharesOwned = parseFloat(p.sharesOwned || '0')
-                  const currentValue = parseFloat(p.currentValueInQuoteToken || '0')
-                  const isPositive = pnl >= 0
-                  const outcomeColor = p.outcome === 'YES' ? 'text-emerald-300' : 'text-rose-300'
 
-                  return (
-                    <div
-                      key={`position-${p.tokenId || p.marketId || idx}`}
-                      className="group relative overflow-hidden rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-5 transition-all hover:ring-white/20 hover:bg-slate-900/50"
-                    >
-                      {/* Market Title - Top */}
-                      <div className="mb-4">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="line-clamp-2 text-sm font-semibold text-slate-100">
-                              {p.marketTitle || `Market ${p.marketId || idx}`}
-                            </div>
-                            {p.rootMarketTitle && (
-                              <div className="mt-1 line-clamp-1 text-xs text-slate-500">
-                                {p.rootMarketTitle}
+              {positions.isLoading ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <SkeletonCard key={`position-skeleton-${i}`} />
+                  ))}
+                </div>
+              ) : positions.error ? (
+                <EmptyState label="Failed to load positions. Check console for details." />
+              ) : (positions.data?.length || 0) === 0 ? (
+                <EmptyState label="No positions found for this wallet address." />
+              ) : (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {(positions.data || []).map((p: UserPosition, idx) => {
+                    const pnl = parseFloat(p.unrealizedPnl || '0')
+                    const pnlPercent = parseFloat(p.unrealizedPnlPercent || '0')
+                    const sharesOwned = parseFloat(p.sharesOwned || '0')
+                    const currentValue = parseFloat(p.currentValueInQuoteToken || '0')
+                    const isPositive = pnl >= 0
+                    const outcomeColor = p.outcome === 'YES' ? 'text-emerald-300' : 'text-rose-300'
+
+                    return (
+                      <div
+                        key={`position-${p.tokenId || p.marketId || idx}`}
+                        className="group relative overflow-hidden rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-5 transition-all hover:ring-white/20 hover:bg-slate-900/50"
+                      >
+                        {/* Market Title - Top */}
+                        <div className="mb-4">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="line-clamp-2 text-sm font-semibold text-slate-100">
+                                {p.marketTitle || `Market ${p.marketId || idx}`}
                               </div>
-                            )}
+                              {p.rootMarketTitle && (
+                                <div className="mt-1 line-clamp-1 text-xs text-slate-500">
+                                  {p.rootMarketTitle}
+                                </div>
+                              )}
+                            </div>
+                            <span className={`shrink-0 text-xs font-bold ${outcomeColor}`}>
+                              {p.outcome || 'N/A'}
+                            </span>
                           </div>
-                          <span className={`shrink-0 text-xs font-bold ${outcomeColor}`}>
-                            {p.outcome || 'N/A'}
+                        </div>
+
+                        {/* Info Tags - Bottom */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                            Shares: {sharesOwned.toLocaleString('en-US', { maximumFractionDigits: 0 })}
                           </span>
+                          <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                            ${currentValue.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          </span>
+                          <span
+                            className={cn(
+                              'rounded-lg px-2.5 py-1 text-xs font-bold ring-1',
+                              isPositive
+                                ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
+                                : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
+                            )}
+                          >
+                            {isPositive ? '+' : ''}${pnl.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                          </span>
+                          <span
+                            className={cn(
+                              'rounded-lg px-2.5 py-1 text-xs font-bold ring-1',
+                              isPositive
+                                ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
+                                : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
+                            )}
+                          >
+                            {isPositive ? '+' : ''}{(pnlPercent * 100).toFixed(2)}%
+                          </span>
+                          {p.sharesFrozen && parseFloat(p.sharesFrozen) > 0 && (
+                            <span className="rounded-lg bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300 ring-1 ring-amber-500/20">
+                              🔒 {parseFloat(p.sharesFrozen).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+                            </span>
+                          )}
                         </div>
                       </div>
-
-                      {/* Info Tags - Bottom */}
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                          Shares: {sharesOwned.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                        </span>
-                        <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                          ${currentValue.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                        </span>
-                        <span
-                          className={cn(
-                            'rounded-lg px-2.5 py-1 text-xs font-bold ring-1',
-                            isPositive
-                              ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
-                              : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
-                          )}
-                        >
-                          {isPositive ? '+' : ''}${pnl.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                        </span>
-                        <span
-                          className={cn(
-                            'rounded-lg px-2.5 py-1 text-xs font-bold ring-1',
-                            isPositive
-                              ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
-                              : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
-                          )}
-                        >
-                          {isPositive ? '+' : ''}{(pnlPercent * 100).toFixed(2)}%
-                        </span>
-                        {p.sharesFrozen && parseFloat(p.sharesFrozen) > 0 && (
-                          <span className="rounded-lg bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-300 ring-1 ring-amber-500/20">
-                            🔒 {parseFloat(p.sharesFrozen).toLocaleString('en-US', { maximumFractionDigits: 0 })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </section>
-        )}
+                    )
+                  })}
+                </div>
+              )}
+            </section>
+          )
+        }
       </div>
-
-      {selectedMarket ? <ChartModal market={selectedMarket} onClose={() => setSelectedMarket(null)} /> : null}
     </main>
   )
 }

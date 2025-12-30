@@ -14,7 +14,10 @@ interface MarketWithPrices {
   volume24h: string
   priceChangePct?: number
   cutoffAt: number
+  marketType: number
 }
+
+
 
 /**
  * GET /api/markets/list
@@ -24,25 +27,45 @@ interface MarketWithPrices {
 async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
   const { searchParams } = new URL(request.url)
   const pageParam = searchParams.get('page')
-  
+
   // Validate page parameter
   const page = InputValidator.validatePage(pageParam)
   const sortBy = 3 // Volume Descending (default per requirements)
 
   // Check cache first (30s TTL for market list to balance freshness and rate limiting)
-  const cacheKey = `markets-list:${page}:${sortBy}`
+  const cacheKey = `markets-list:${page}:${sortBy}:50`
   const cachedData = cache.get<{ markets: MarketWithPrices[], total: number }>(cacheKey)
-  
+
   if (cachedData) {
     return NextResponse.json(cachedData)
   }
 
-  // Fetch markets with pagination
-  const { markets, total } = await opinionClient.getMarkets(page, sortBy)
-  
+  // Fetch markets from multiple pages to aggregate a larger list (API limit is 20)
+  const API_PAGES_PER_REQUEST = 8
+  const startApiPage = (page - 1) * API_PAGES_PER_REQUEST + 1
+
+  const marketPromises = []
+  for (let i = 0; i < API_PAGES_PER_REQUEST; i++) {
+    marketPromises.push(opinionClient.getMarkets(startApiPage + i, sortBy, 20))
+  }
+
+  const results = await Promise.all(marketPromises)
+
+  let markets: any[] = []
+  let total = 0
+
+  for (const res of results) {
+    markets = [...markets, ...res.markets]
+    // Use the total from the first successful response (should be the same)
+    if (res.total > total) total = res.total
+  }
+
   if (!markets || markets.length === 0) {
     return NextResponse.json({ markets: [], total: 0 })
   }
+
+  console.log(`[API] Fetched ${markets.length} markets from OpinionAPI (Total available: ${total})`)
+
 
   // Fetch prices for all markets in parallel (with rate limiting handled by client)
   const marketsWithPrices: MarketWithPrices[] = []
@@ -75,15 +98,20 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
         noPrice,
         volume24h: market.volume24h || '0',
         cutoffAt: market.cutoffAt || 0,
+        marketType: market.marketType || 0,
       })
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       errors.push(`Market ${market.id}: ${errorMessage}`)
       console.error(`Error processing market ${market.id}:`, error)
+      console.error(`Error processing market ${market.id}:`, error)
       continue
     }
   }
+
+  console.log(`[API] Returning ${marketsWithPrices.length} markets after price fetching and validation (Errors: ${errors.length})`)
+
 
   // Log processing summary
   if (errors.length > 0) {

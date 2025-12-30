@@ -122,8 +122,8 @@ class RequestQueue {
   private lastRequestTime = 0
 
   constructor(
-    private readonly minInterval: number = 100, // Minimum 100ms between requests
-    private readonly maxConcurrent: number = 5   // Maximum 5 concurrent requests
+    private readonly minInterval: number = 34, // ~30 requests per second
+    private readonly maxConcurrent: number = 10  // Increased concurrency
   ) {}
 
   /**

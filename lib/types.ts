@@ -1,4 +1,5 @@
 // Core data interfaces
+// Core data interfaces
 export interface Market {
   id: number           // mapped from Opinion API marketId
   title: string        // mapped from Opinion API marketTitle  
@@ -7,6 +8,26 @@ export interface Market {
   cutoffAt: number
   status: string | number  // handles both statusEnum and numeric status
   volume24h: string
+  marketType: number   // 0=Binary, 1=Categorical
+  description?: string // rules/description
+  questionId?: string
+  rules?: string
+  childMarkets?: Market[] // For categorical markets
+  yesLabel?: string
+  noLabel?: string
+}
+
+export interface OrderbookLevel {
+  price: string
+  size: string
+}
+
+export interface Orderbook {
+  market: string
+  tokenId: string
+  timestamp: number
+  bids: OrderbookLevel[]
+  asks: OrderbookLevel[]
 }
 
 export interface PriceData {
