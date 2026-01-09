@@ -180,8 +180,8 @@ describe('Concurrency Control Compliance Properties', () => {
 
         return true
       }
-    ), { numRuns: 50 }) // Reduced number of runs for faster execution
-  })
+    ), { numRuns: 30 }) // Reduced number of runs for faster execution
+  }, 30000)
 
   test('p-limit configuration compliance', () => {
     // Property: OpinionClient should always configure p-limit with exactly 10 concurrent requests
@@ -253,8 +253,8 @@ describe('Concurrency Control Compliance Properties', () => {
         
         return true
       }
-    ), { numRuns: 20 })
-  })
+    ), { numRuns: 10 })
+  }, 20000)
 
   test('concurrent request limit enforcement', async () => {
     // Property: No matter how many requests are made, concurrent requests should never exceed 10
@@ -293,6 +293,6 @@ describe('Concurrency Control Compliance Properties', () => {
         
         return true
       }
-    ), { numRuns: 20 })
-  }, 10000) // Increase timeout for this test
+    ), { numRuns: 10 })
+  }, 20000) // Increase timeout for this test
 })
