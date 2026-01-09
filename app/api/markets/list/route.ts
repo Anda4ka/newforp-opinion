@@ -16,6 +16,7 @@ interface MarketWithPrices {
   priceChangePct?: number
   cutoffAt: number
   marketType: number
+  childMarkets?: Market[]
 }
 
 
@@ -93,6 +94,7 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
         volume24h: market.volume24h || '0',
         cutoffAt: market.cutoffAt || 0,
         marketType: market.marketType || 0,
+        childMarkets: market.childMarkets,
       })
 
     } catch (error) {
