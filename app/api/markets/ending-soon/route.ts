@@ -6,7 +6,7 @@ import {
   createEndingSoonMarket
 } from '@/lib/analytics'
 import { parsePrice } from '@/lib/utils'
-import { EndingSoonMarket } from '@/lib/types'
+import { EndingSoonMarket, Market } from '@/lib/types'
 import { withErrorHandler, InputValidator, APIError, ErrorType } from '@/lib/errorHandler'
 
 /**
@@ -30,7 +30,8 @@ async function endingSoonHandler(request: NextRequest): Promise<NextResponse> {
   }
 
   // Requirement 3.1: Fetch markets and filter by time and status
-  const { markets } = await opinionClient.getMarkets(1, 2) // Use ending soon sort
+  const marketsResponse = await opinionClient.getMarkets(1, 2) as { markets?: Market[]; total?: number } | Market[] | null // Use ending soon sort
+  const markets = Array.isArray(marketsResponse) ? marketsResponse : marketsResponse?.markets ?? []
   
   if (!markets || markets.length === 0) {
     console.warn('No markets available for ending-soon analysis, returning empty array')

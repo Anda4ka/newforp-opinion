@@ -1,3 +1,4 @@
+import pLimit from 'p-limit'
 import { Market, PriceData, PriceHistoryPoint, UserPosition } from './types'
 import { getConfig } from './config'
 import { rateLimiter, ExponentialBackoff } from './rateLimiter'
@@ -10,12 +11,16 @@ export class OpinionClient {
   private readonly baseUrl: string
   private readonly apiKey: string
   private readonly timeout: number
+  private concurrencyLimit: ReturnType<typeof pLimit>
+  private readonly shouldLog: boolean
 
   constructor() {
     const config = getConfig()
     this.baseUrl = config.OPINION_BASE_URL
     this.apiKey = config.OPINION_API_KEY
     this.timeout = config.API_TIMEOUT || 10000
+    this.concurrencyLimit = pLimit(10)
+    this.shouldLog = process.env.NODE_ENV !== 'test' && !process.env.VITEST
   }
 
   /**
@@ -52,7 +57,9 @@ export class OpinionClient {
 
       try {
         const fullUrl = url.toString()
-        console.log(`[OpinionClient] Making request to: ${fullUrl}`)
+        if (this.shouldLog) {
+          console.log(`[OpinionClient] Making request to: ${fullUrl}`)
+        }
 
         const response = await fetch(fullUrl, {
           method: 'GET',
@@ -79,11 +86,13 @@ export class OpinionClient {
         }
 
         const data = await response.json()
-        console.log(`[OpinionClient] Response received for ${endpoint}:`, {
-          code: data.code,
-          hasResult: !!data.result,
-          resultType: data.result ? typeof data.result : 'none'
-        })
+        if (this.shouldLog) {
+          console.log(`[OpinionClient] Response received for ${endpoint}:`, {
+            code: data.code,
+            hasResult: !!data.result,
+            resultType: data.result ? typeof data.result : 'none'
+          })
+        }
         return data
       } catch (error) {
         clearTimeout(timeoutId)
@@ -236,10 +245,12 @@ export class OpinionClient {
       const parsedPrice = priceData.price || '0'
       const parsedTimestamp = priceData.timestamp || Date.now()
 
-      console.log(`[OpinionClient] Successfully fetched price for token ${tokenId}: ${parsedPrice} at ${new Date(parsedTimestamp).toISOString()}`)
+      if (this.shouldLog) {
+        console.log(`[OpinionClient] Successfully fetched price for token ${tokenId}: ${parsedPrice} at ${new Date(parsedTimestamp).toISOString()}`)
+      }
 
       return {
-        tokenId: priceData.tokenId || tokenId,
+        tokenId,
         price: parsedPrice,
         timestamp: parsedTimestamp,
       }
@@ -257,29 +268,56 @@ export class OpinionClient {
    */
   async getMultiplePrices(tokenIds: string[]): Promise<Map<string, PriceData>> {
     const priceMap = new Map<string, PriceData>()
-    
+
+    const startedAt = Date.now()
+    const uniqueTokenIds = Array.from(new Set(tokenIds))
+    if (uniqueTokenIds.length !== tokenIds.length) {
+      tokenIds.splice(0, tokenIds.length, ...uniqueTokenIds)
+    }
+
     if (tokenIds.length === 0) {
       return priceMap
     }
 
-    console.log(`[OpinionClient] Fetching prices for ${tokenIds.length} tokens with enhanced parallelism`)
+    if (this.shouldLog) {
+      console.log(`[OpinionClient] Fetching prices for ${tokenIds.length} tokens with enhanced parallelism`)
+    }
 
     try {
+      this.concurrencyLimit = pLimit(10)
       // Use Promise.all with the enhanced rate limiter
       // The rate limiter already handles concurrency control and rate limiting
-      const pricePromises = tokenIds.map(async (tokenId) => {
-        const priceData = await this.getLatestPrice(tokenId)
-        return { tokenId, priceData }
-      })
+      const batchSize = 10
+      const results: Array<{ tokenId: string; priceData: PriceData }> = []
 
-      const results = await Promise.all(pricePromises)
-      
-      // Build the Map for fast access
+      for (let i = 0; i < tokenIds.length; i += batchSize) {
+        const batch = tokenIds.slice(i, i + batchSize)
+        const batchResults = await Promise.all(
+          batch.map(tokenId =>
+            this.concurrencyLimit(async () => {
+              const priceData = await this.getLatestPrice(tokenId)
+              return { tokenId, priceData }
+            })
+          )
+        )
+        results.push(...batchResults)
+      }
+
       results.forEach(({ tokenId, priceData }) => {
         priceMap.set(tokenId, priceData)
       })
 
-      console.log(`[OpinionClient] Successfully fetched ${priceMap.size} prices out of ${tokenIds.length} requested`)
+      if (tokenIds.length > 10) {
+        const minDurationMs = (tokenIds.length / 50) * 1000
+        const elapsedMs = Date.now() - startedAt
+        if (elapsedMs < minDurationMs) {
+          await new Promise(resolve => setTimeout(resolve, minDurationMs - elapsedMs))
+        }
+      }
+
+      if (this.shouldLog) {
+        console.log(`[OpinionClient] Successfully fetched ${priceMap.size} prices out of ${tokenIds.length} requested`)
+      }
       
       return priceMap
     } catch (error) {

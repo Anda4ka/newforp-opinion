@@ -3,6 +3,7 @@ import { opinionClient } from '@/lib/opinionClient'
 import cache from '@/lib/cache'
 import { parsePrice } from '@/lib/utils'
 import { withErrorHandler, InputValidator } from '@/lib/errorHandler'
+import { Market } from '@/lib/types'
 
 interface MarketWithPrices {
   id: number
@@ -43,7 +44,9 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
 
   // CRITICAL FIX (C1): Fetch only ONE page instead of 8 parallel pages
   // This prevents massive rate limit breach (was causing 320 req/s vs 30 limit)
-  const { markets, total } = await opinionClient.getMarkets(page, sortBy, limit)
+  const marketsResponse = await opinionClient.getMarkets(page, sortBy, limit) as { markets?: Market[]; total?: number } | Market[] | null
+  const markets = Array.isArray(marketsResponse) ? marketsResponse : marketsResponse?.markets ?? []
+  const total = Array.isArray(marketsResponse) ? markets.length : marketsResponse?.total ?? 0
 
   if (!markets || markets.length === 0) {
     return NextResponse.json({ markets: [], total: 0 })

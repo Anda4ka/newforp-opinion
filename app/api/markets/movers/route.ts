@@ -9,7 +9,7 @@ import {
   processMarket
 } from '@/lib/analytics'
 import { parsePrice } from '@/lib/utils'
-import { MarketMover, TimeframePrices } from '@/lib/types'
+import { Market, MarketMover, TimeframePrices } from '@/lib/types'
 import { withErrorHandler, InputValidator, APIError, ErrorType } from '@/lib/errorHandler'
 
 /**
@@ -33,7 +33,8 @@ async function moversHandler(request: NextRequest): Promise<NextResponse> {
   }
 
   // Fetch fresh data with error handling
-  const { markets } = await opinionClient.getMarkets(1, 5) // Use volume24h desc for movers
+  const marketsResponse = await opinionClient.getMarkets(1, 5) as { markets?: Market[]; total?: number } | Market[] | null
+  const markets = Array.isArray(marketsResponse) ? marketsResponse : marketsResponse?.markets ?? [] // Use volume24h desc for movers
   
   if (!markets || markets.length === 0) {
     console.warn('No markets available, returning empty array')
