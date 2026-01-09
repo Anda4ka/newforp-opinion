@@ -88,6 +88,8 @@ interface ChildMarketPreview {
   volume24h: string
 }
 
+}
+
 const marketsPerPage = 100
 
 function SkeletonCard() {
@@ -209,6 +211,7 @@ export default function Home() {
   })
 
   // Search State
+  // Search and Filter State
   const [searchQuery, setSearchQuery] = useState('')
 
   // Derived filtered markets
@@ -417,17 +420,29 @@ export default function Home() {
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                       {visibleMarkets.map((market) => {
                         const chance = Math.max(0, Math.min(1, market.yesPrice)) * 100
+                        // Calculate price change if possible (simplified - could be enhanced with historical data)
+                        const hasTrending = market.priceChangePct !== undefined
+                        const isPositive = market.priceChangePct !== undefined && market.priceChangePct >= 0
+
+                        // Improved Categorical Detection for Badge
+                        const isCategorical = market.marketType === 1 || (market.childMarkets && market.childMarkets.length > 0)
 
                         return (
                           <a
                             key={`market-${market.id}`}
                             href={`/market/${market.id}?type=0`}
+                            href={`/market/${market.id}?type=${isCategorical ? 1 : 0}`}
                             className="group relative block overflow-hidden rounded-2xl bg-slate-900/40 p-5 text-left ring-1 ring-white/10 transition-all hover:bg-slate-900/50 hover:ring-white/20"
                           >
                             {/* Market Title - Top */}
                             <div className="mb-4">
                               <div className="mb-2 flex items-center gap-2">
                                 <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 ring-1 ring-emerald-500/20">BINARY</span>
+                                {isCategorical ? (
+                                  <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-400 ring-1 ring-blue-500/20">CATEGORICAL</span>
+                                ) : (
+                                  <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 ring-1 ring-emerald-500/20">BINARY</span>
+                                )}
                               </div>
                               <div className="line-clamp-2 text-sm font-semibold text-slate-100 transition-colors group-hover:text-white">
                                 {market.title || `Market ${market.id}`}
@@ -439,6 +454,38 @@ export default function Home() {
                               <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/5">
                                 {Math.round(chance)}% chance
                               </span>
+                              {!isCategorical ? (
+                                <>
+                                  <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                                    YES {market.yesPrice.toFixed(2)}
+                                  </span>
+                                  <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                                    NO {market.noPrice.toFixed(2)}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
+                                  View Outcomes &rarr;
+                                </span>
+                              )}
+
+                              {hasTrending && (
+                                <span
+                                  className={cn(
+                                    'flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-bold ring-1',
+                                    isPositive
+                                      ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
+                                      : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
+                                  )}
+                                >
+                                  {isPositive ? (
+                                    <TrendingUp className="h-3 w-3" />
+                                  ) : (
+                                    <TrendingDown className="h-3 w-3" />
+                                  )}
+                                  {formatPct(market.priceChangePct!)}
+                                </span>
+                              )}
                               <span className="ml-auto rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-400 ring-1 ring-white/5">
                                 ${formatUsdCompact(Number(market.volume24h) || 0)}
                               </span>
