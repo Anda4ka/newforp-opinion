@@ -276,7 +276,7 @@ export default function MarketDetailPage({ params, searchParams }: { params: { i
                         <div className="mb-2 flex items-center gap-2">
                             <span className={cn(
                                 "rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1",
-                                market.status === 'Activated' || market.status === 2
+                                market.status === 'Activated'
                                     ? "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20"
                                     : "bg-slate-800 text-slate-400 ring-white/10"
                             )}>

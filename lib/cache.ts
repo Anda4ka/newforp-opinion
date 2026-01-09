@@ -3,7 +3,9 @@ import { CacheEntry, CacheSystem } from './types'
 /**
  * Enhanced cache entry with access tracking for optimization
  */
-interface EnhancedCacheEntry<T> extends CacheEntry<T> {
+interface EnhancedCacheEntry<T> {
+  data: T
+  expiresAt: number
   accessCount: number
   lastAccessed: number
 }
@@ -41,7 +43,7 @@ class InMemoryCache implements CacheSystem {
    */
   get<T>(key: string): T | null {
     const entry = this.cache.get(key)
-    
+
     if (!entry) {
       this.stats.misses++
       return null
@@ -70,7 +72,7 @@ class InMemoryCache implements CacheSystem {
    */
   set<T>(key: string, data: T, ttlSeconds: number): void {
     const expiresAt = Date.now() + (ttlSeconds * 1000)
-    
+
     // If cache is at max size and key doesn't exist, make room
     if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
       this.evictOldest()
@@ -90,12 +92,12 @@ class InMemoryCache implements CacheSystem {
   has(key: string): boolean {
     const entry = this.cache.get(key)
     if (!entry) return false
-    
+
     if (Date.now() > entry.expiresAt) {
       this.cache.delete(key)
       return false
     }
-    
+
     return true
   }
 
@@ -104,8 +106,8 @@ class InMemoryCache implements CacheSystem {
    * Helps prevent duplicate API calls during cache misses
    */
   async getOrSet<T>(
-    key: string, 
-    factory: () => Promise<T>, 
+    key: string,
+    factory: () => Promise<T>,
     ttlSeconds: number
   ): Promise<T> {
     // Try to get from cache first
@@ -160,18 +162,17 @@ class InMemoryCache implements CacheSystem {
 
   /**
    * Remove expired entries from cache
+   * MINOR FIX: Optimized to delete in one pass
    */
   private cleanupExpired(): void {
     const now = Date.now()
-    const keysToDelete: string[] = []
 
-    this.cache.forEach((entry, key) => {
+    // Delete expired entries directly instead of collecting keys first
+    for (const [key, entry] of this.cache.entries()) {
       if (now > entry.expiresAt) {
-        keysToDelete.push(key)
+        this.cache.delete(key)
       }
-    })
-
-    keysToDelete.forEach(key => this.cache.delete(key))
+    }
   }
 
   /**
@@ -202,15 +203,15 @@ class InMemoryCache implements CacheSystem {
     // Remove 10% of entries when at capacity
     const entriesToRemove = Math.max(1, Math.floor(this.maxSize * 0.1))
     const entries: [string, EnhancedCacheEntry<any>][] = []
-    
+
     // Convert iterator to array manually for compatibility
     this.cache.forEach((value, key) => {
       entries.push([key, value])
     })
-    
+
     // Sort by expiration time (oldest first)
     entries.sort((a, b) => a[1].expiresAt - b[1].expiresAt)
-    
+
     for (let i = 0; i < entriesToRemove && i < entries.length; i++) {
       this.cache.delete(entries[i][0])
     }
@@ -222,7 +223,12 @@ class InMemoryCache implements CacheSystem {
   private startCleanupTimer(): void {
     // Clean up expired entries every 60 seconds
     this.cleanupInterval = setInterval(() => {
-      this.cleanupExpired()
+      try {
+        this.cleanupExpired()
+      } catch (error) {
+        // Log error but don't crash the process
+        console.error('[Cache] Cleanup failed:', error)
+      }
     }, 60000)
 
     // Ensure cleanup timer doesn't prevent process exit

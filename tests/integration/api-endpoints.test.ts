@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { GET as moversGET } from '@/app/api/markets/movers/route'
-import { GET as arbitrageGET } from '@/app/api/markets/arbitrage/route'
 import { GET as endingSoonGET } from '@/app/api/markets/ending-soon/route'
 import { GET as priceHistoryGET } from '@/app/api/charts/price-history/route'
 import { opinionClient } from '@/lib/opinionClient'
@@ -177,62 +176,6 @@ describe('API Endpoints Integration Tests', () => {
     })
   })
 
-  describe('Arbitrage Endpoint Integration', () => {
-    it('should complete full workflow with arbitrage calculation', async () => {
-      // Setup prices that create arbitrage opportunity
-      vi.mocked(opinionClient.getLatestPrice)
-        .mockImplementation(async (tokenId: string) => ({
-          tokenId,
-          price: tokenId.includes('yes') ? '0.60' : '0.50', // 0.60 + 0.50 = 1.10 (10% arbitrage)
-          timestamp: Math.floor(Date.now() / 1000)
-        }))
-
-      const request = new NextRequest('http://localhost/api/markets/arbitrage')
-      const response = await arbitrageGET(request)
-      
-      expect(response.status).toBe(200)
-      const data = await response.json()
-      
-      // Verify response structure
-      expect(Array.isArray(data)).toBe(true)
-      
-      if (data.length > 0) {
-        const opportunity = data[0]
-        expect(opportunity).toHaveProperty('marketId')
-        expect(opportunity).toHaveProperty('marketTitle')
-        expect(opportunity).toHaveProperty('yesPrice')
-        expect(opportunity).toHaveProperty('noPrice')
-        expect(opportunity).toHaveProperty('arbPct')
-        expect(opportunity).toHaveProperty('suggestion')
-        
-        // Verify arbitrage calculation
-        expect(opportunity.arbPct).toBeGreaterThanOrEqual(4) // Should be >= 4% threshold
-        expect(['YES_UNDERPRICED', 'NO_UNDERPRICED']).toContain(opportunity.suggestion)
-      }
-    })
-
-    it('should filter out opportunities below 4% threshold', async () => {
-      // Setup prices with low arbitrage (below 4%)
-      vi.mocked(opinionClient.getLatestPrice)
-        .mockImplementation(async (tokenId: string) => ({
-          tokenId,
-          price: tokenId.includes('yes') ? '0.51' : '0.48', // 0.51 + 0.48 = 0.99 (-1% arbitrage)
-          timestamp: Math.floor(Date.now() / 1000)
-        }))
-
-      const request = new NextRequest('http://localhost/api/markets/arbitrage')
-      const response = await arbitrageGET(request)
-      
-      expect(response.status).toBe(200)
-      const data = await response.json()
-      
-      // Should return empty array or only opportunities >= 4%
-      data.forEach((opportunity: any) => {
-        expect(Math.abs(opportunity.arbPct)).toBeGreaterThanOrEqual(4)
-      })
-    })
-  })
-
   describe('Ending Soon Endpoint Integration', () => {
     it('should complete full workflow with time filtering', async () => {
       const request = new NextRequest('http://localhost/api/markets/ending-soon?hours=3')
@@ -345,10 +288,6 @@ describe('API Endpoints Integration Tests', () => {
       const moversRequest = new NextRequest('http://localhost/api/markets/movers?timeframe=1h')
       await moversGET(moversRequest)
       
-      // Test arbitrage cache (30s TTL)
-      const arbitrageRequest = new NextRequest('http://localhost/api/markets/arbitrage')
-      await arbitrageGET(arbitrageRequest)
-      
       // Test ending-soon cache (60s TTL)
       const endingSoonRequest = new NextRequest('http://localhost/api/markets/ending-soon?hours=1')
       await endingSoonGET(endingSoonRequest)
@@ -359,7 +298,6 @@ describe('API Endpoints Integration Tests', () => {
       
       // Verify cache entries exist
       expect(cache.get('movers:1h')).not.toBeNull()
-      expect(cache.get('arbitrage')).not.toBeNull()
       expect(cache.get('ending-soon:1')).not.toBeNull()
       expect(cache.get('price-history:yes-token-1:no-token-1:1h')).not.toBeNull()
     })
@@ -488,18 +426,6 @@ describe('API Endpoints Integration Tests', () => {
         expect(mover.yesPrice).toBe(yesPrice)
         expect(mover.noPrice).toBe(noPrice)
         expect(mover.marketPrice).toBeCloseTo((yesPrice + (1 - noPrice)) / 2, 2)
-      }
-
-      // Test arbitrage endpoint
-      const arbitrageRequest = new NextRequest('http://localhost/api/markets/arbitrage')
-      const arbitrageResponse = await arbitrageGET(arbitrageRequest)
-      const arbitrageData = await arbitrageResponse.json()
-      
-      if (arbitrageData.length > 0) {
-        const opportunity = arbitrageData[0]
-        expect(opportunity.yesPrice).toBe(yesPrice)
-        expect(opportunity.noPrice).toBe(noPrice)
-        expect(opportunity.arbPct).toBeCloseTo((yesPrice + noPrice - 1) * 100, 2)
       }
     })
   })

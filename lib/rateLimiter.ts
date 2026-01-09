@@ -1,7 +1,10 @@
 /**
- * Rate Limiting and Request Management System
+ * Rate Limiting and Request Management System with Real Parallelism
  * Requirement 6.5: Implement rate limit mitigation mechanisms
+ * Uses p-limit for true concurrent request control
  */
+
+import pLimit from 'p-limit'
 
 /**
  * Circuit breaker states
@@ -25,7 +28,7 @@ class CircuitBreaker {
     private readonly failureThreshold: number = 5,
     private readonly recoveryTimeout: number = 60000, // 1 minute
     private readonly successThreshold: number = 3
-  ) {}
+  ) { }
 
   /**
    * Execute a function with circuit breaker protection
@@ -45,14 +48,14 @@ class CircuitBreaker {
       this.onSuccess()
       return result
     } catch (error) {
-      this.onFailure()
+      this.onFailure(error as Error)
       throw error
     }
   }
 
   private onSuccess(): void {
     this.failureCount = 0
-    
+
     if (this.state === CircuitState.HALF_OPEN) {
       this.successCount++
       if (this.successCount >= this.successThreshold) {
@@ -61,10 +64,18 @@ class CircuitBreaker {
     }
   }
 
-  private onFailure(): void {
+  private onFailure(error?: Error): void {
+    // M5 FIX: Don't open circuit for rate limit errors (429)
+    // Rate limits are temporary and don't indicate service failure
+    const is429 = error?.message.includes('429') || error?.message.includes('Rate limit')
+    if (is429) {
+      console.warn('[CircuitBreaker] Rate limit detected, not counting as failure')
+      return
+    }
+
     this.failureCount++
     this.lastFailureTime = Date.now()
-    
+
     if (this.failureCount >= this.failureThreshold) {
       this.state = CircuitState.OPEN
     }
@@ -110,65 +121,111 @@ class RequestDeduplicator {
 }
 
 /**
- * Request queue with delay for rate limit compliance
+ * Rate limiter with real parallelism using p-limit
+ * Supports true concurrent execution with rate limiting
  */
-class RequestQueue {
-  private queue: Array<{
-    fn: () => Promise<any>
-    resolve: (value: any) => void
-    reject: (error: any) => void
-  }> = []
-  private processing = false
-  private lastRequestTime = 0
+class ParallelRateLimiter {
+  private readonly concurrencyLimit: ReturnType<typeof pLimit>
+  private readonly requestsPerSecond: number
+  private requestTimes: number[] = []
+  private readonly MAX_HISTORY_SIZE = 1000 // M6 FIX: Prevent unbounded growth
 
   constructor(
-    private readonly minInterval: number = 34, // ~30 requests per second
-    private readonly maxConcurrent: number = 10  // Increased concurrency
-  ) {}
+    maxConcurrent: number = 10,
+    requestsPerSecond: number = 30
+  ) {
+    this.concurrencyLimit = pLimit(maxConcurrent)
+    this.requestsPerSecond = requestsPerSecond
+  }
 
   /**
-   * Add a request to the queue
+   * Execute request with concurrency and rate limiting
    */
-  async enqueue<T>(fn: () => Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      this.queue.push({ fn, resolve, reject })
-      this.processQueue()
+  async execute<T>(fn: () => Promise<T>): Promise<T> {
+    return this.concurrencyLimit(async () => {
+      // Rate limiting check
+      await this.enforceRateLimit()
+
+      // Execute the actual request
+      const startTime = Date.now()
+      try {
+        const result = await fn()
+        this.recordRequest(startTime)
+        return result
+      } catch (error) {
+        this.recordRequest(startTime)
+        throw error
+      }
     })
   }
 
-  private async processQueue(): Promise<void> {
-    if (this.processing || this.queue.length === 0) {
-      return
-    }
-
-    this.processing = true
-
-    while (this.queue.length > 0) {
+  /**
+   * Enforce rate limiting by tracking request times
+   */
+  private async enforceRateLimit(): Promise<void> {
+    // Iterative approach instead of recursion to prevent stack overflow
+    while (true) {
       const now = Date.now()
-      const timeSinceLastRequest = now - this.lastRequestTime
+      const oneSecondAgo = now - 1000
 
-      // Ensure minimum interval between requests
-      if (timeSinceLastRequest < this.minInterval) {
-        await this.delay(this.minInterval - timeSinceLastRequest)
+      // Clean old request times (older than 1 second)
+      this.requestTimes = this.requestTimes.filter(time => time > oneSecondAgo)
+
+      // M6 FIX: Limit history size to prevent memory leak
+      if (this.requestTimes.length > this.MAX_HISTORY_SIZE) {
+        this.requestTimes = this.requestTimes.slice(-this.MAX_HISTORY_SIZE)
       }
 
-      const request = this.queue.shift()
-      if (!request) break
+      // If we're within the rate limit, proceed
+      if (this.requestTimes.length < this.requestsPerSecond) {
+        break
+      }
 
-      try {
-        this.lastRequestTime = Date.now()
-        const result = await request.fn()
-        request.resolve(result)
-      } catch (error) {
-        request.reject(error)
+      // Calculate how long to wait
+      // M8 FIX: Safety check for empty array (shouldn't happen, but be defensive)
+      if (this.requestTimes.length === 0) {
+        break
+      }
+      const oldestRequest = Math.min(...this.requestTimes)
+      const waitTime = 1000 - (now - oldestRequest) + 10 // Add 10ms buffer
+
+      if (waitTime > 0) {
+        await new Promise(resolve => setTimeout(resolve, waitTime))
+        // Loop continues to recheck after waiting
+      } else {
+        // Edge case: should not happen, but break to prevent infinite loop
+        break
       }
     }
-
-    this.processing = false
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
+  /**
+   * Record request time for rate limiting
+   */
+  private recordRequest(startTime: number): void {
+    this.requestTimes.push(startTime)
+  }
+
+  /**
+   * Get current concurrency stats
+   */
+  getStats(): { activeCount: number; pendingCount: number; requestsInLastSecond: number } {
+    const now = Date.now()
+    const oneSecondAgo = now - 1000
+    const requestsInLastSecond = this.requestTimes.filter(time => time > oneSecondAgo).length
+
+    return {
+      activeCount: this.concurrencyLimit.activeCount,
+      pendingCount: this.concurrencyLimit.pendingCount,
+      requestsInLastSecond
+    }
+  }
+
+  /**
+   * Clear rate limiting history
+   */
+  reset(): void {
+    this.requestTimes = []
   }
 }
 
@@ -189,7 +246,7 @@ class ExponentialBackoff {
    */
   static async executeWithBackoff<T>(
     fn: () => Promise<T>,
-    maxAttempts: number = 3,
+    maxAttempts: number = 5, // M7 FIX: Increased from 3 to 5 for better resilience
     baseDelay: number = 1000
   ): Promise<T> {
     let lastError: Error
@@ -199,10 +256,12 @@ class ExponentialBackoff {
         return await fn()
       } catch (error) {
         lastError = error as Error
-        
-        // Don't retry on 429 (rate limit) responses as per requirement
-        if (error instanceof Error && error.message.includes('429')) {
-          throw error
+
+        // M4 FIX: Check for APIError type first, then fallback to string matching
+        const is429 = (error instanceof Error && error.message.includes('429')) ||
+          (error instanceof Error && error.message.includes('Rate limit'))
+        if (is429) {
+          throw error // Don't retry rate limits
         }
 
         // Don't retry on the last attempt
@@ -221,35 +280,35 @@ class ExponentialBackoff {
 }
 
 /**
- * Rate limiter service that combines all mitigation strategies
+ * Enhanced rate limiter service with real parallelism
  */
 export class RateLimiterService {
   private circuitBreaker: CircuitBreaker
   private requestDeduplicator: RequestDeduplicator
-  private requestQueue: RequestQueue
+  private parallelLimiter: ParallelRateLimiter
 
-  constructor() {
+  constructor(maxConcurrent: number = 10, requestsPerSecond: number = 30) {
     this.circuitBreaker = new CircuitBreaker()
     this.requestDeduplicator = new RequestDeduplicator()
-    this.requestQueue = new RequestQueue()
+    this.parallelLimiter = new ParallelRateLimiter(maxConcurrent, requestsPerSecond)
   }
 
   /**
-   * Execute a request with all rate limiting protections
+   * Execute a request with all rate limiting protections and real parallelism
    */
   async executeRequest<T>(
     key: string,
     fn: () => Promise<T>,
     options: {
-      useQueue?: boolean
       useDeduplication?: boolean
       useCircuitBreaker?: boolean
+      useRateLimiting?: boolean
     } = {}
   ): Promise<T> {
     const {
-      useQueue = true,
       useDeduplication = true,
-      useCircuitBreaker = true
+      useCircuitBreaker = true,
+      useRateLimiting = true
     } = options
 
     let requestFn = fn
@@ -266,12 +325,30 @@ export class RateLimiterService {
       requestFn = () => this.requestDeduplicator.execute(key, originalFn)
     }
 
-    // Apply request queuing
-    if (useQueue) {
-      return this.requestQueue.enqueue(requestFn)
+    // Apply parallel rate limiting
+    if (useRateLimiting) {
+      return this.parallelLimiter.execute(requestFn)
     }
 
     return requestFn()
+  }
+
+  /**
+   * Execute multiple requests in parallel with rate limiting
+   */
+  async executeParallel<T>(
+    requests: Array<{ key: string; fn: () => Promise<T> }>,
+    options?: {
+      useDeduplication?: boolean
+      useCircuitBreaker?: boolean
+      useRateLimiting?: boolean
+    }
+  ): Promise<T[]> {
+    const promises = requests.map(({ key, fn }) =>
+      this.executeRequest(key, fn, options)
+    )
+
+    return Promise.all(promises)
   }
 
   /**
@@ -282,19 +359,32 @@ export class RateLimiterService {
   }
 
   /**
+   * Get rate limiter statistics
+   */
+  getStats(): {
+    circuitState: string
+    concurrency: { activeCount: number; pendingCount: number; requestsInLastSecond: number }
+  } {
+    return {
+      circuitState: this.circuitBreaker.getState(),
+      concurrency: this.parallelLimiter.getStats()
+    }
+  }
+
+  /**
    * Clear all pending requests and reset state
    */
   reset(): void {
     this.requestDeduplicator.clear()
     this.circuitBreaker = new CircuitBreaker()
-    this.requestQueue = new RequestQueue()
+    this.parallelLimiter.reset()
   }
 }
 
 /**
- * Global rate limiter instance
+ * Global rate limiter instance with enhanced parallelism
  */
-export const rateLimiter = new RateLimiterService()
+export const rateLimiter = new RateLimiterService(10, 30) // 10 concurrent, 30 req/s
 
 /**
  * Export utilities for direct use

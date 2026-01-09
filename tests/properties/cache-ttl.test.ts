@@ -35,18 +35,15 @@ describe('Cache TTL Properties', () => {
         noPrice: fc.float({ min: Math.fround(0.01), max: Math.fround(0.99), noNaN: true })
       }),
       (key, data) => {
-        // Test movers/arbitrage TTL (30 seconds)
-        const moversArbitrageTTL = 30
-        cache.set(`movers_${key}`, data, moversArbitrageTTL)
-        cache.set(`arbitrage_${key}`, data, moversArbitrageTTL)
+        // Test movers TTL (30 seconds)
+        const moversTTL = 30
+        cache.set(`movers_${key}`, data, moversTTL)
         
         // Data should be available immediately
         const moversResult = cache.get(`movers_${key}`)
-        const arbitrageResult = cache.get(`arbitrage_${key}`)
         
-        return moversResult !== null && arbitrageResult !== null &&
-               JSON.stringify(moversResult) === JSON.stringify(data) &&
-               JSON.stringify(arbitrageResult) === JSON.stringify(data)
+        return moversResult !== null &&
+               JSON.stringify(moversResult) === JSON.stringify(data)
       }
     ), { numRuns: 100 })
 

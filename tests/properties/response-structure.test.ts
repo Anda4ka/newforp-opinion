@@ -10,8 +10,7 @@ import * as fc from 'fast-check'
 import type { 
   MarketMover, 
   EndingSoonMarket, 
-  PriceHistoryChart,
-  ArbitrageOpportunity 
+  PriceHistoryChart
 } from '@/lib/types'
 
 describe('Response Structure Completeness', () => {
@@ -103,36 +102,6 @@ describe('Response Structure Completeness', () => {
           chart.timestamps.every(t => typeof t === 'number' && t > 0) &&
           chart.yesPrices.every(p => typeof p === 'number' && !isNaN(p) && p >= 0 && p <= 1) &&
           chart.noAsYesPrices.every(p => typeof p === 'number' && !isNaN(p) && p >= 0 && p <= 1)
-        )
-      }
-    ), { numRuns: 100 })
-
-    // Test ArbitrageOpportunity response structure (implied by design)
-    fc.assert(fc.property(
-      fc.record({
-        marketId: fc.integer({ min: 1, max: 999999 }),
-        marketTitle: fc.string({ minLength: 1, maxLength: 200 }),
-        yesPrice: fc.float({ min: 0, max: 1, noNaN: true }),
-        noPrice: fc.float({ min: 0, max: 1, noNaN: true }),
-        arbPct: fc.float({ min: 4, max: 50, noNaN: true }), // Only significant arbitrage >= 4%
-        suggestion: fc.constantFrom('YES_UNDERPRICED' as const, 'NO_UNDERPRICED' as const)
-      }),
-      (arb: ArbitrageOpportunity) => {
-        // Verify all required fields are present and correctly typed
-        return (
-          typeof arb.marketId === 'number' &&
-          typeof arb.marketTitle === 'string' &&
-          typeof arb.yesPrice === 'number' &&
-          typeof arb.noPrice === 'number' &&
-          typeof arb.arbPct === 'number' &&
-          typeof arb.suggestion === 'string' &&
-          arb.marketId > 0 &&
-          arb.marketTitle.length > 0 &&
-          !isNaN(arb.yesPrice) &&
-          !isNaN(arb.noPrice) &&
-          !isNaN(arb.arbPct) &&
-          arb.arbPct >= 4 &&
-          (arb.suggestion === 'YES_UNDERPRICED' || arb.suggestion === 'NO_UNDERPRICED')
         )
       }
     ), { numRuns: 100 })

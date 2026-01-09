@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { opinionClient } from '@/lib/opinionClient'
-import { withErrorHandler } from '@/lib/errorHandler'
+import { withErrorHandler, InputValidator } from '@/lib/errorHandler'
 
 /**
  * GET /api/history?tokenId=...&interval=1h
@@ -8,12 +8,12 @@ import { withErrorHandler } from '@/lib/errorHandler'
  */
 async function historyHandler(request: NextRequest): Promise<NextResponse> {
     const { searchParams } = new URL(request.url)
-    const tokenId = searchParams.get('tokenId')
-    const interval = searchParams.get('interval') || '1h'
+    const tokenIdParam = searchParams.get('tokenId')
+    const intervalParam = searchParams.get('interval')
 
-    if (!tokenId) {
-        return NextResponse.json({ error: 'Missing tokenId' }, { status: 400 })
-    }
+    // M2 FIX: Add input validation
+    const tokenId = InputValidator.validateTokenId(tokenIdParam, 'tokenId')
+    const interval = InputValidator.validateInterval(intervalParam)
 
     const history = await opinionClient.getPriceHistory(tokenId, interval)
 

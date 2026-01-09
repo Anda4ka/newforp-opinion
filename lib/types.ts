@@ -1,138 +1,134 @@
-// Core data interfaces
-// Core data interfaces
+/**
+ * Type definitions for Opinion Whale Prediction Market Terminal
+ * Consolidated from various files to prevent import errors
+ */
+
+// Configuration types
+export interface Config {
+    OPINION_API_KEY: string
+    OPINION_BASE_URL: string
+    CACHE_MAX_SIZE: number
+    API_TIMEOUT: number
+}
+
+// Market types
 export interface Market {
-  id: number           // mapped from Opinion API marketId
-  title: string        // mapped from Opinion API marketTitle  
-  yesTokenId: string
-  noTokenId: string
-  cutoffAt: number
-  status: string | number  // handles both statusEnum and numeric status
-  volume24h: string
-  marketType: number   // 0=Binary, 1=Categorical
-  description?: string // rules/description
-  questionId?: string
-  rules?: string
-  childMarkets?: Market[] // For categorical markets
-  yesLabel?: string
-  noLabel?: string
+    id: number
+    title: string
+    yesTokenId: string
+    noTokenId: string
+    cutoffAt: number
+    status: string
+    volume24h: string
+    marketType: number
+    questionId?: string
+    rules?: string
+    yesLabel?: string
+    noLabel?: string
+    childMarkets?: Market[]
 }
 
-export interface OrderbookLevel {
-  price: string
-  size: string
-}
-
-export interface Orderbook {
-  market: string
-  tokenId: string
-  timestamp: number
-  bids: OrderbookLevel[]
-  asks: OrderbookLevel[]
-}
-
+// Price data types
 export interface PriceData {
-  tokenId: string
-  price: string
-  timestamp: number
+    tokenId: string
+    price: string
+    timestamp: number
+    side?: string
+    size?: string
 }
 
 export interface PriceHistoryPoint {
-  t: number  // unix seconds
-  p: string  // price as string
+    t: number // timestamp
+    p: string // price
 }
 
-// API Response Types
-export interface MarketMover {
-  marketId: number
-  marketTitle: string
-  marketPrice: number
-  priceChangePct: number
-  volume24h: string
-  yesTokenId: string
-  noTokenId: string
-  yesPrice: number
-  noPrice: number
+// Orderbook types
+export interface OrderbookEntry {
+    price: string
+    size: string
 }
 
-export interface ArbitrageOpportunity {
-  marketId: number
-  marketTitle: string
-  yesPrice: number
-  noPrice: number
-  arbPct: number
-  suggestion: 'YES_UNDERPRICED' | 'NO_UNDERPRICED'
+export interface Orderbook {
+    market: string
+    tokenId: string
+    timestamp: number
+    bids: OrderbookEntry[]
+    asks: OrderbookEntry[]
 }
 
-export interface EndingSoonMarket {
-  marketId: number
-  marketTitle: string
-  cutoffAt: number
-  yesPrice: number
-  volume: string
-}
-
-export interface PriceHistoryChart {
-  timestamps: number[]
-  yesPrices: number[]
-  noAsYesPrices: number[]
-}
-
+// User position types
 export interface UserPosition {
-  marketId: number
-  marketTitle: string
-  marketStatus: number
-  marketStatusEnum: string
-  marketCutoffAt: number
-  rootMarketId: number
-  rootMarketTitle: string
-  outcome: 'YES' | 'NO'
-  outcomeSide: number
-  outcomeSideEnum: 'Yes' | 'No'
-  sharesOwned: string
-  sharesFrozen: string
-  unrealizedPnl: string
-  unrealizedPnlPercent: string
-  dailyPnlChange: string
-  dailyPnlChangePercent: string
-  conditionId: string
-  tokenId: string
-  currentValueInQuoteToken: string
-  avgEntryPrice: string
-  claimStatus: number
-  claimStatusEnum: string
-  quoteToken: string
+    tokenId: string
+    marketId: number
+    marketTitle: string
+    rootMarketTitle?: string
+    outcome: 'YES' | 'NO'
+    sharesOwned: string
+    sharesFrozen?: string
+    averageCost: string
+    currentValueInQuoteToken: string
+    unrealizedPnl: string
+    unrealizedPnlPercent: string
 }
 
-// Internal Processing Types
-export interface ProcessedMarket {
-  market: Market
-  yesPrice: number
-  noPrice: number
-  marketPrice: number
-  noAsYes: number
+// Market mover types (for analytics)
+export interface MarketMover {
+    marketId: number
+    marketTitle: string
+    marketPrice: number
+    priceChangePct: number
+    volume24h: string
+    yesTokenId: string
+    noTokenId: string
+    yesPrice: number
+    noPrice: number
 }
 
-export interface TimeframePrices {
-  current: ProcessedMarket
-  previous: ProcessedMarket | null
-}
-
-// Cache System Types
+// Cache types
 export interface CacheEntry<T> {
-  data: T
-  expiresAt: number
+    data: T
+    expiresAt: number
 }
 
 export interface CacheSystem {
-  get<T>(key: string): T | null
-  set<T>(key: string, data: T, ttlSeconds: number): void
-  clear(): void
+    get<T>(key: string): T | null
+    set<T>(key: string, data: T, ttlSeconds: number): void
+    has(key: string): boolean
+    clear(): void
+    size(): number
 }
 
-// Configuration Types
-export interface Config {
-  OPINION_API_KEY: string
-  OPINION_BASE_URL: string
-  CACHE_MAX_SIZE?: number
-  API_TIMEOUT?: number
+// Redis-specific types
+export interface MarketData {
+    id: string
+    [key: string]: any
+}
+
+// Chart types
+export interface PriceHistoryChart {
+    timestamps: number[]
+    yesPrices: number[]
+    noAsYesPrices: number[]
+}
+
+// Analytics types
+export interface TimeframePrices {
+    current: number
+    previous: number
+}
+
+export interface EndingSoonMarket {
+    marketId: number
+    marketTitle: string
+    cutoffAt: number
+    yesPrice: number
+    volume: string
+}
+
+export interface ProcessedMarket {
+    market: Market
+    yesPrice: number
+    noPrice: number
+    marketPrice: number
+    noAsYes: number
 }

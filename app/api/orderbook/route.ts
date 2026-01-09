@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { opinionClient } from '@/lib/opinionClient'
-import { withErrorHandler } from '@/lib/errorHandler'
+import { withErrorHandler, InputValidator } from '@/lib/errorHandler'
 
 /**
  * GET /api/orderbook?tokenId=...
@@ -8,11 +8,10 @@ import { withErrorHandler } from '@/lib/errorHandler'
  */
 async function orderbookHandler(request: NextRequest): Promise<NextResponse> {
     const { searchParams } = new URL(request.url)
-    const tokenId = searchParams.get('tokenId')
+    const tokenIdParam = searchParams.get('tokenId')
 
-    if (!tokenId) {
-        return NextResponse.json({ error: 'Missing tokenId' }, { status: 400 })
-    }
+    // M2 FIX: Add input validation
+    const tokenId = InputValidator.validateTokenId(tokenIdParam, 'tokenId')
 
     const orderbook = await opinionClient.getOrderbook(tokenId)
 

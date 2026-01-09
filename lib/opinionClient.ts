@@ -23,6 +23,11 @@ export class OpinionClient {
    * Requirement 6.1: Include HTTP header "apikey" with API key
    * Requirement 6.5: Implement rate limit mitigation mechanisms
    */
+  /**
+   * Make authenticated HTTP request to Opinion API with rate limiting
+   * Requirement 6.1: Include HTTP header "apikey" with API key
+   * Requirement 6.5: Implement rate limit mitigation mechanisms
+   */
   private async makeRequest<T>(endpoint: string, params?: Record<string, string>): Promise<T> {
     // Ensure endpoint starts with / for proper URL construction
     const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
@@ -40,7 +45,7 @@ export class OpinionClient {
     // Create request key for deduplication
     const requestKey = `${endpoint}:${JSON.stringify(params || {})}`
 
-    // Execute request with rate limiting protections
+    // Execute request with enhanced rate limiting protections
     return rateLimiter.executeRequest(requestKey, async () => {
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), this.timeout)
@@ -241,6 +246,53 @@ export class OpinionClient {
     } catch (error) {
       console.error(`[OpinionClient] Failed to fetch price for token ${tokenId}:`, error)
       return { tokenId, price: '0', timestamp: Date.now() }
+    }
+  }
+
+  /**
+   * Get multiple prices in batch with concurrency control
+   * Returns Map<tokenId, PriceData> for fast access
+   * Uses enhanced rate limiter with real parallelism
+   * Requirements: 3.1, 3.5
+   */
+  async getMultiplePrices(tokenIds: string[]): Promise<Map<string, PriceData>> {
+    const priceMap = new Map<string, PriceData>()
+    
+    if (tokenIds.length === 0) {
+      return priceMap
+    }
+
+    console.log(`[OpinionClient] Fetching prices for ${tokenIds.length} tokens with enhanced parallelism`)
+
+    try {
+      // Use Promise.all with the enhanced rate limiter
+      // The rate limiter already handles concurrency control and rate limiting
+      const pricePromises = tokenIds.map(async (tokenId) => {
+        const priceData = await this.getLatestPrice(tokenId)
+        return { tokenId, priceData }
+      })
+
+      const results = await Promise.all(pricePromises)
+      
+      // Build the Map for fast access
+      results.forEach(({ tokenId, priceData }) => {
+        priceMap.set(tokenId, priceData)
+      })
+
+      console.log(`[OpinionClient] Successfully fetched ${priceMap.size} prices out of ${tokenIds.length} requested`)
+      
+      return priceMap
+    } catch (error) {
+      console.error(`[OpinionClient] Failed to fetch multiple prices:`, error)
+      
+      // Return partial results with fallback data for failed requests
+      tokenIds.forEach(tokenId => {
+        if (!priceMap.has(tokenId)) {
+          priceMap.set(tokenId, { tokenId, price: '0', timestamp: Date.now() })
+        }
+      })
+      
+      return priceMap
     }
   }
 

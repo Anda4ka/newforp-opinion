@@ -3,7 +3,6 @@ import {
   noAsYes, 
   marketPrice, 
   priceChangePct, 
-  arbitragePct, 
   determineUnderpriced,
   isValidPrice,
   safeDivide,
@@ -39,12 +38,7 @@ describe('Utility Functions', () => {
     })
   })
 
-  describe('arbitragePct', () => {
-    it('should calculate arbitrage percentage', () => {
-      expect(arbitragePct(0.6, 0.5)).toBeCloseTo(10, 10) // (0.6 + 0.5 - 1) * 100
-      expect(arbitragePct(0.5, 0.5)).toBe(0)  // Perfect market
-    })
-  })
+
 
   describe('determineUnderpriced', () => {
     it('should determine underpriced token', () => {

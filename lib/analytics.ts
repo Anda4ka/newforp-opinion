@@ -2,18 +2,15 @@
  * Business logic and analytics functions for market data processing
  */
 
-import { 
-  Market, 
-  MarketMover, 
-  ArbitrageOpportunity, 
+import {
+  Market,
+  MarketMover,
   EndingSoonMarket,
-  ProcessedMarket 
+  ProcessedMarket
 } from './types'
-import { 
-  marketPrice, 
-  priceChangePct, 
-  arbitragePct, 
-  determineUnderpriced,
+import {
+  marketPrice,
+  priceChangePct,
   noAsYes,
   parsePrice,
   hoursUntil
@@ -24,7 +21,7 @@ import {
  * Requirements: 1.3, 6.3
  */
 export const calculatePriceChange = (
-  currentPrice: number, 
+  currentPrice: number,
   previousPrice: number
 ): number => {
   return priceChangePct(currentPrice, previousPrice)
@@ -38,26 +35,7 @@ export const getMarketPrice = (yesPrice: number, noPrice: number): number => {
   return marketPrice(yesPrice, noPrice)
 }
 
-/**
- * Calculate arbitrage percentage for a market
- * Requirements: 2.2
- */
-export const calculateArbitragePercentage = (
-  yesPrice: number, 
-  noPrice: number
-): number => {
-  return arbitragePct(yesPrice, noPrice)
-}
 
-/**
- * Filter arbitrage opportunities by minimum threshold (4%)
- * Requirements: 2.3
- */
-export const filterSignificantArbitrage = (
-  opportunities: ArbitrageOpportunity[]
-): ArbitrageOpportunity[] => {
-  return opportunities.filter(opp => opp.arbPct >= 4)
-}
 
 /**
  * Sort market movers by price change (primary) and volume (secondary)
@@ -88,9 +66,9 @@ export const filterEndingSoon = (
 ): Market[] => {
   return markets.filter(market => {
     // Check if market is activated
-    const isActivated = market.status === 'activated' || market.status === 1
+    const isActivated = market.status === 'activated'
     if (!isActivated) return false
-    
+
     // Check if market ends within specified hours
     const timeUntilCutoff = hoursUntil(market.cutoffAt)
     return timeUntilCutoff > 0 && timeUntilCutoff <= hours
@@ -122,25 +100,7 @@ export const processMarket = (
   }
 }
 
-/**
- * Create an arbitrage opportunity from market data
- * Requirements: 2.2, 2.4, 2.5
- */
-export const createArbitrageOpportunity = (
-  marketId: number,
-  marketTitle: string,
-  yesPrice: number,
-  noPrice: number
-): ArbitrageOpportunity => {
-  return {
-    marketId,
-    marketTitle,
-    yesPrice,
-    noPrice,
-    arbPct: calculateArbitragePercentage(yesPrice, noPrice),
-    suggestion: determineUnderpriced(yesPrice, noPrice)
-  }
-}
+
 
 /**
  * Create a market mover entry

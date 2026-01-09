@@ -31,34 +31,19 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
   // Validate page parameter
   const page = InputValidator.validatePage(pageParam)
   const sortBy = 3 // Volume Descending (default per requirements)
+  const limit = 50 // Request more markets per page
 
   // Check cache first (30s TTL for market list to balance freshness and rate limiting)
-  const cacheKey = `markets-list:${page}:${sortBy}:50`
+  const cacheKey = `markets-list:${page}:${sortBy}:${limit}`
   const cachedData = cache.get<{ markets: MarketWithPrices[], total: number }>(cacheKey)
 
   if (cachedData) {
     return NextResponse.json(cachedData)
   }
 
-  // Fetch markets from multiple pages to aggregate a larger list (API limit is 20)
-  const API_PAGES_PER_REQUEST = 8
-  const startApiPage = (page - 1) * API_PAGES_PER_REQUEST + 1
-
-  const marketPromises = []
-  for (let i = 0; i < API_PAGES_PER_REQUEST; i++) {
-    marketPromises.push(opinionClient.getMarkets(startApiPage + i, sortBy, 20))
-  }
-
-  const results = await Promise.all(marketPromises)
-
-  let markets: any[] = []
-  let total = 0
-
-  for (const res of results) {
-    markets = [...markets, ...res.markets]
-    // Use the total from the first successful response (should be the same)
-    if (res.total > total) total = res.total
-  }
+  // CRITICAL FIX (C1): Fetch only ONE page instead of 8 parallel pages
+  // This prevents massive rate limit breach (was causing 320 req/s vs 30 limit)
+  const { markets, total } = await opinionClient.getMarkets(page, sortBy, limit)
 
   if (!markets || markets.length === 0) {
     return NextResponse.json({ markets: [], total: 0 })
@@ -66,19 +51,25 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
 
   console.log(`[API] Fetched ${markets.length} markets from OpinionAPI (Total available: ${total})`)
 
+  // CRITICAL FIX (M1): Use batch pricing API instead of individual requests
+  // Collect all unique token IDs
+  const allTokenIds: string[] = []
+  markets.forEach(market => {
+    if (market.yesTokenId) allTokenIds.push(market.yesTokenId)
+    if (market.noTokenId) allTokenIds.push(market.noTokenId)
+  })
 
-  // Fetch prices for all markets in parallel (with rate limiting handled by client)
+  // Fetch ALL prices in batch (2 requests total instead of 2N)
+  const priceMap = await opinionClient.getMultiplePrices(allTokenIds)
+
+  // Build markets with prices
   const marketsWithPrices: MarketWithPrices[] = []
   const errors: string[] = []
 
-  // Process markets to get prices
   for (const market of markets) {
     try {
-      // Get current prices
-      const [yesPriceData, noPriceData] = await Promise.all([
-        opinionClient.getLatestPrice(market.yesTokenId),
-        opinionClient.getLatestPrice(market.noTokenId)
-      ])
+      const yesPriceData = priceMap.get(market.yesTokenId)
+      const noPriceData = priceMap.get(market.noTokenId)
 
       const yesPrice = parsePrice(yesPriceData?.price || '0')
       const noPrice = parsePrice(noPriceData?.price || '0')
@@ -105,12 +96,11 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       errors.push(`Market ${market.id}: ${errorMessage}`)
       console.error(`Error processing market ${market.id}:`, error)
-      console.error(`Error processing market ${market.id}:`, error)
       continue
     }
   }
 
-  console.log(`[API] Returning ${marketsWithPrices.length} markets after price fetching and validation (Errors: ${errors.length})`)
+  console.log(`[API] Returning ${marketsWithPrices.length} markets after price fetching (Errors: ${errors.length})`)
 
 
   // Log processing summary

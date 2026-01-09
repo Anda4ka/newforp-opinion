@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { NextRequest } from 'next/server'
 import { GET as moversGET } from '@/app/api/markets/movers/route'
-import { GET as arbitrageGET } from '@/app/api/markets/arbitrage/route'
 import { GET as endingSoonGET } from '@/app/api/markets/ending-soon/route'
 import { GET as priceHistoryGET } from '@/app/api/charts/price-history/route'
 import { opinionClient } from '@/lib/opinionClient'
