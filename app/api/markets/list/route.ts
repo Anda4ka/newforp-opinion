@@ -4,6 +4,7 @@ import cache from '@/lib/cache'
 import { parsePrice } from '@/lib/utils'
 import { withErrorHandler, InputValidator } from '@/lib/errorHandler'
 import { Market } from '@/lib/types'
+import { isMarketInvalid } from '@/lib/invalidMarkets'
 
 interface MarketWithPrices {
   id: number
@@ -17,6 +18,15 @@ interface MarketWithPrices {
   cutoffAt: number
   marketType: number
   childMarkets?: Market[]
+  childMarketsPreview?: ChildMarketPreview[]
+}
+
+interface ChildMarketPreview {
+  id: number
+  title: string
+  yesTokenId: string
+  yesPrice: number
+  volume24h: string
 }
 
 
@@ -46,7 +56,13 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
   // CRITICAL FIX (C1): Fetch only ONE page instead of 8 parallel pages
   // This prevents massive rate limit breach (was causing 320 req/s vs 30 limit)
   const marketsResponse = await opinionClient.getMarkets(page, sortBy, limit) as { markets?: Market[]; total?: number } | Market[] | null
-  const markets = Array.isArray(marketsResponse) ? marketsResponse : marketsResponse?.markets ?? []
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const rawMarkets = Array.isArray(marketsResponse) ? marketsResponse : marketsResponse?.markets ?? []
+  const markets = rawMarkets.filter(market => {
+    if (isMarketInvalid(market.id)) return false
+    if (market.cutoffAt && market.cutoffAt <= nowSeconds) return false
+    return true
+  })
   const total = Array.isArray(marketsResponse) ? markets.length : marketsResponse?.total ?? 0
 
   if (!markets || markets.length === 0) {
@@ -58,9 +74,27 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
   // CRITICAL FIX (M1): Use batch pricing API instead of individual requests
   // Collect all unique token IDs
   const allTokenIds: string[] = []
+  const childMarketPreviewMap = new Map<number, Market[]>()
   markets.forEach(market => {
     if (market.yesTokenId) allTokenIds.push(market.yesTokenId)
     if (market.noTokenId) allTokenIds.push(market.noTokenId)
+
+    if (market.childMarkets && market.childMarkets.length > 0) {
+      const filteredChildren = market.childMarkets.filter(child => {
+        if (child.cutoffAt && child.cutoffAt <= nowSeconds) return false
+        return true
+      })
+      const sortedChildren = [...filteredChildren].sort((a, b) => {
+        const volumeA = Number(a.volume24h ?? 0)
+        const volumeB = Number(b.volume24h ?? 0)
+        return volumeB - volumeA
+      })
+      const topChildren = sortedChildren.slice(0, 3)
+      childMarketPreviewMap.set(market.id, topChildren)
+      topChildren.forEach(child => {
+        if (child.yesTokenId) allTokenIds.push(child.yesTokenId)
+      })
+    }
   })
 
   // Fetch ALL prices in batch (2 requests total instead of 2N)
@@ -95,6 +129,16 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
         cutoffAt: market.cutoffAt || 0,
         marketType: market.marketType || 0,
         childMarkets: market.childMarkets,
+        childMarketsPreview: (childMarketPreviewMap.get(market.id) || []).map(child => {
+          const yesPriceData = priceMap.get(child.yesTokenId)
+          return {
+            id: child.id,
+            title: child.title || `Market ${child.id}`,
+            yesTokenId: child.yesTokenId,
+            yesPrice: parsePrice(yesPriceData?.price || '0'),
+            volume24h: child.volume24h || '0',
+          }
+        }),
       })
 
     } catch (error) {

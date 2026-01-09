@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { opinionClient } from '@/lib/opinionClient'
 import { withErrorHandler } from '@/lib/errorHandler'
+import { isMarketInvalid, markMarketInvalid } from '@/lib/invalidMarkets'
 
 /**
  * GET /api/markets/[id]
@@ -13,6 +14,9 @@ async function marketDetailHandler(
     const marketId = parseInt(params.id)
     if (isNaN(marketId)) {
         return NextResponse.json({ error: 'Invalid market ID' }, { status: 400 })
+    }
+    if (isMarketInvalid(marketId)) {
+        return NextResponse.json({ error: 'Market not found' }, { status: 404 })
     }
 
     const { searchParams } = new URL(request.url)
@@ -36,6 +40,7 @@ async function marketDetailHandler(
                 return NextResponse.json(categoricalMarket)
             }
         }
+        markMarketInvalid(marketId)
         return NextResponse.json({ error: 'Market not found' }, { status: 404 })
     }
 

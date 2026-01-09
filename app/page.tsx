@@ -12,8 +12,6 @@ import {
   LineChart as LineChartIcon,
   Wallet,
   X,
-  TrendingUp,
-  TrendingDown,
 } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
@@ -30,12 +28,6 @@ const fetcher = async <T,>(url: string): Promise<T> => {
     throw new Error(errorData.error || `Request failed: ${res.status}`)
   }
   return res.json() as Promise<T>
-}
-
-function formatPct(value: number) {
-  const pct = value * 100
-  const sign = pct > 0 ? '+' : ''
-  return `${sign}${pct.toFixed(2)}%`
 }
 
 function formatUsdCompact(value: number) {
@@ -85,6 +77,17 @@ interface MarketWithPrices {
   cutoffAt: number
   marketType: number
   childMarkets?: Market[]
+  childMarketsPreview?: ChildMarketPreview[]
+}
+
+interface ChildMarketPreview {
+  id: number
+  title: string
+  yesTokenId: string
+  yesPrice: number
+  volume24h: string
+}
+
 }
 
 const marketsPerPage = 100
@@ -207,27 +210,18 @@ export default function Home() {
     columns: 1,
   })
 
+  // Search State
   // Search and Filter State
   const [searchQuery, setSearchQuery] = useState('')
-  const [filterType, setFilterType] = useState<'ALL' | 'BINARY' | 'CATEGORICAL'>('ALL')
 
   // Derived filtered markets
   const filteredMarkets = useMemo(() => {
     return allMarkets.filter(market => {
-      // 1. Search Filter
       const matchesSearch = market.title.toLowerCase().includes(searchQuery.toLowerCase())
-
-      // 2. Type Filter
-      // Improved logic: If marketType is 1 OR has childMarkets, treat as Categorical
       const isCategorical = market.marketType === 1 || (market.childMarkets && market.childMarkets.length > 0)
-      const matchesType =
-        filterType === 'ALL' ? true :
-          filterType === 'CATEGORICAL' ? isCategorical :
-            !isCategorical // BINARY
-
-      return matchesSearch && matchesType
+      return matchesSearch && !isCategorical
     })
-  }, [allMarkets, searchQuery, filterType])
+  }, [allMarkets, searchQuery])
 
   const onWatch = useCallback(() => {
     setWatchedAddress(walletInput.trim())
@@ -374,7 +368,7 @@ export default function Home() {
           </div>
 
 
-          {/* Search and Filter Controls */}
+          {/* Search Controls */}
           <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center">
             {/* Search */}
             <div className="relative flex-1">
@@ -390,23 +384,13 @@ export default function Home() {
               />
             </div>
 
-            {/* Filter Tabs */}
-            <div className="flex rounded-xl bg-slate-900/60 p-1 ring-1 ring-white/10">
-              {(['ALL', 'BINARY', 'CATEGORICAL'] as const).map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setFilterType(type)}
-                  className={cn(
-                    "px-4 py-1.5 text-xs font-semibold rounded-lg transition-all",
-                    filterType === type
-                      ? "bg-slate-700 text-white shadow-sm"
-                      : "text-slate-400 hover:text-slate-200"
-                  )}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
+            <a
+              href="/categories"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900/60 px-4 py-2 text-xs font-semibold text-slate-200 ring-1 ring-white/10 transition-all hover:bg-slate-900/80"
+            >
+              View Categories
+              <ArrowUpRight className="h-3 w-3" />
+            </a>
           </div>
         </header >
 
@@ -435,6 +419,7 @@ export default function Home() {
                   <div style={{ transform: `translateY(${startRow * rowHeight}px)` }}>
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                       {visibleMarkets.map((market) => {
+                        const chance = Math.max(0, Math.min(1, market.yesPrice)) * 100
                         // Calculate price change if possible (simplified - could be enhanced with historical data)
                         const hasTrending = market.priceChangePct !== undefined
                         const isPositive = market.priceChangePct !== undefined && market.priceChangePct >= 0
@@ -445,12 +430,14 @@ export default function Home() {
                         return (
                           <a
                             key={`market-${market.id}`}
+                            href={`/market/${market.id}?type=0`}
                             href={`/market/${market.id}?type=${isCategorical ? 1 : 0}`}
                             className="group relative block overflow-hidden rounded-2xl bg-slate-900/40 p-5 text-left ring-1 ring-white/10 transition-all hover:bg-slate-900/50 hover:ring-white/20"
                           >
                             {/* Market Title - Top */}
                             <div className="mb-4">
                               <div className="mb-2 flex items-center gap-2">
+                                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 ring-1 ring-emerald-500/20">BINARY</span>
                                 {isCategorical ? (
                                   <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-400 ring-1 ring-blue-500/20">CATEGORICAL</span>
                                 ) : (
@@ -464,6 +451,9 @@ export default function Home() {
 
                             {/* Prices and Info - Bottom as Tags */}
                             <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/5">
+                                {Math.round(chance)}% chance
+                              </span>
                               {!isCategorical ? (
                                 <>
                                   <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
