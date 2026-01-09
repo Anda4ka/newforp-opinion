@@ -32,7 +32,7 @@ async function marketsListHandler(request: NextRequest): Promise<NextResponse> {
   // Validate page parameter
   const page = InputValidator.validatePage(pageParam)
   const sortBy = 3 // Volume Descending (default per requirements)
-  const limit = 50 // Request more markets per page
+  const limit = 100 // Request more markets per page
 
   // Check cache first (30s TTL for market list to balance freshness and rate limiting)
   const cacheKey = `markets-list:${page}:${sortBy}:${limit}`

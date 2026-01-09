@@ -120,86 +120,106 @@ export class OpinionClient {
    */
   async getMarkets(page: number = 1, sortBy: number = 3, limit: number = 50): Promise<{ markets: Market[], total: number }> {
     try {
-      // Use exponential backoff for critical requests
-      // sortBy=3 sorts by volume descending (default per requirements)
-      const response = await ExponentialBackoff.executeWithBackoff(
-        () => this.makeRequest<any>('/market', {
-          status: 'activated',
-          limit: String(limit),
-          page: String(page),
-          sortBy: String(sortBy)
-        }),
-        2, // Max 2 attempts
-        1000 // 1 second base delay
+      // Opinion API returns only 2 markets per page regardless of limit parameter
+      // To get 50 markets, we need to fetch 25 pages in parallel
+      const ITEMS_PER_PAGE = 2
+      const pagesToFetch = Math.ceil(limit / ITEMS_PER_PAGE)
+      const startPage = (page - 1) * pagesToFetch + 1
+      
+      console.log(`[OpinionClient] Fetching ${pagesToFetch} pages (${startPage}-${startPage + pagesToFetch - 1}) to get ${limit} markets`)
+
+      // Fetch multiple pages in parallel
+      const pageRequests = Array.from({ length: pagesToFetch }, (_, i) => 
+        ExponentialBackoff.executeWithBackoff(
+          () => this.makeRequest<any>('/market', {
+            status: 'activated',
+            limit: String(ITEMS_PER_PAGE),
+            page: String(startPage + i),
+            sortBy: String(sortBy)
+          }),
+          2,
+          1000
+        ).catch(error => {
+          console.warn(`[OpinionClient] Failed to fetch page ${startPage + i}:`, error.message)
+          return null
+        })
       )
 
-      // Handle Opinion API response structure: { code: 0, msg: "success", result: { total: number, list: Market[] } }
-      if (!response) {
-        console.warn('[OpinionClient] Empty response for markets')
-        return { markets: [], total: 0 }
+      const responses = await Promise.all(pageRequests)
+      
+      // Parse and validate each response
+      const parseResponse = (response: any, pageNum: number) => {
+        if (!response) {
+          console.log(`[OpinionClient] Page ${pageNum}: NULL response`)
+          return { markets: [], total: 0 }
+        }
+        
+        if (response.code !== undefined && response.code !== 0) {
+          console.log(`[OpinionClient] Page ${pageNum}: Error code ${response.code}`)
+          return { markets: [], total: 0 }
+        }
+        
+        if (response.errno !== undefined && response.errno !== 0) {
+          console.log(`[OpinionClient] Page ${pageNum}: Error errno ${response.errno}`)
+          return { markets: [], total: 0 }
+        }
+        
+        if (!response.result || !Array.isArray(response.result.list)) {
+          console.log(`[OpinionClient] Page ${pageNum}: No result.list array`)
+          return { markets: [], total: 0 }
+        }
+
+        const total = response.result.total || 0
+        const listLength = response.result.list.length
+        console.log(`[OpinionClient] Page ${pageNum}: ${listLength} markets in list`)
+        
+        const markets = response.result.list.map((market: any) => ({
+          id: market.marketId || market.id || 0,
+          title: market.marketTitle || market.title || '',
+          yesTokenId: market.yesTokenId || '',
+          noTokenId: market.noTokenId || '',
+          cutoffAt: market.cutoffAt || 0,
+          status: market.statusEnum || market.status || 'unknown',
+          volume24h: market.volume24h || '0',
+          marketType: market.marketType || 0,
+          questionId: market.questionId,
+          rules: market.rules,
+          yesLabel: market.yesLabel,
+          noLabel: market.noLabel,
+          childMarkets: market.childMarkets ? market.childMarkets.map((cm: any) => ({
+            id: cm.marketId,
+            title: cm.marketTitle,
+            yesTokenId: cm.yesTokenId,
+            noTokenId: cm.noTokenId,
+            cutoffAt: cm.cutoffAt,
+            status: cm.statusEnum,
+            volume24h: cm.volume,
+            marketType: 0,
+            questionId: cm.questionId,
+            rules: cm.rules,
+            yesLabel: cm.yesLabel,
+            noLabel: cm.noLabel
+          })) : []
+        }))
+
+        return { markets, total }
       }
 
-      // Check for API-level errors (code !== 0 means error per API documentation)
-      // Some responses may not have code field, so we check if it exists and is non-zero
-      if (response.code !== undefined && response.code !== 0) {
-        console.warn(`[OpinionClient] API returned error for markets: code=${response.code}, msg=${response.msg || response.errmsg || ''}`)
-        return { markets: [], total: 0 }
+      // Combine all results
+      const allMarkets: Market[] = []
+      let totalCount = 0
+
+      for (let i = 0; i < responses.length; i++) {
+        const parsed = parseResponse(responses[i], startPage + i)
+        allMarkets.push(...parsed.markets)
+        if (parsed.total > totalCount) {
+          totalCount = parsed.total
+        }
       }
 
-      // Also check errno field (used by some endpoints like positions)
-      if (response.errno !== undefined && response.errno !== 0) {
-        console.warn(`[OpinionClient] API returned error for markets: errno=${response.errno}, errmsg=${response.errmsg || ''}`)
-        return { markets: [], total: 0 }
-      }
+      console.log(`[OpinionClient] Successfully fetched ${allMarkets.length} markets from ${pagesToFetch} pages (total available: ${totalCount})`)
 
-      // Data is in result.list according to documentation
-      if (!response.result) {
-        console.warn('[OpinionClient] No result field in markets response:', response)
-        return { markets: [], total: 0 }
-      }
-
-      if (!Array.isArray(response.result.list)) {
-        console.warn('[OpinionClient] result.list is not an array:', {
-          result: response.result,
-          resultType: typeof response.result,
-          listType: typeof response.result.list
-        })
-        return { markets: [], total: 0 }
-      }
-
-      const total = response.result.total || 0
-      const markets = response.result.list.map((market: any) => ({
-        id: market.marketId || market.id || 0,
-        title: market.marketTitle || market.title || '',
-        yesTokenId: market.yesTokenId || '',
-        noTokenId: market.noTokenId || '',
-        cutoffAt: market.cutoffAt || 0,
-        status: market.statusEnum || market.status || 'unknown',
-        volume24h: market.volume24h || '0',
-        marketType: market.marketType || 0,
-        questionId: market.questionId,
-        rules: market.rules,
-        yesLabel: market.yesLabel,
-        noLabel: market.noLabel,
-        childMarkets: market.childMarkets ? market.childMarkets.map((cm: any) => ({
-          id: cm.marketId,
-          title: cm.marketTitle,
-          yesTokenId: cm.yesTokenId,
-          noTokenId: cm.noTokenId,
-          cutoffAt: cm.cutoffAt,
-          status: cm.statusEnum,
-          volume24h: cm.volume,
-          marketType: 0, // Child markets are effectively binary
-          questionId: cm.questionId,
-          rules: cm.rules,
-          yesLabel: cm.yesLabel,
-          noLabel: cm.noLabel
-        })) : []
-      }))
-
-      console.log(`[OpinionClient] Successfully parsed ${markets.length} markets (page ${page}, total: ${total})`)
-
-      return { markets, total }
+      return { markets: allMarkets, total: totalCount }
     } catch (error) {
       console.error('[OpinionClient] Failed to fetch markets:', error)
       return { markets: [], total: 0 }
