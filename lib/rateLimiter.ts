@@ -148,12 +148,10 @@ class ParallelRateLimiter {
 
       // Execute the actual request
       const startTime = Date.now()
+      this.recordRequest(startTime)
       try {
-        const result = await fn()
-        this.recordRequest(startTime)
-        return result
+        return await fn()
       } catch (error) {
-        this.recordRequest(startTime)
         throw error
       }
     })

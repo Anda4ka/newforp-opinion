@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, useEffect } from 'react'
 import Link from 'next/link'
 import useSWR from 'swr'
 import type { ClassValue } from 'clsx'
@@ -99,7 +99,15 @@ interface PricePoint {
     p: string
 }
 
-function PriceChart({ market, selectedTokenId }: { market: Market, selectedTokenId: string }) {
+function PriceChart({
+    market,
+    selectedTokenId,
+    interval,
+}: {
+    market: Market
+    selectedTokenId: string
+    interval: '1h' | '1d'
+}) {
     // Determine the relevant pair (Yes/No tokens)
     const pair = useMemo(() => {
         if (market.marketType === 1 && market.childMarkets) {
@@ -113,12 +121,12 @@ function PriceChart({ market, selectedTokenId }: { market: Market, selectedToken
 
     // Fetch history for both tokens
     const { data: yesHistory } = useSWR<{ history: PricePoint[] }>(
-        pair.yes ? `/api/history?tokenId=${pair.yes}&interval=1h` : null,
+        pair.yes ? `/api/history?tokenId=${pair.yes}&interval=${interval}` : null,
         fetcher
     )
 
     const { data: noHistory } = useSWR<{ history: PricePoint[] }>(
-        pair.no ? `/api/history?tokenId=${pair.no}&interval=1h` : null,
+        pair.no ? `/api/history?tokenId=${pair.no}&interval=${interval}` : null,
         fetcher
     )
 
@@ -203,13 +211,15 @@ export default function MarketDetailPage({ params, searchParams }: { params: { i
     const { data: market, error, isLoading } = useSWR<Market>(
         `/api/markets/${id}?type=${type || '0'}`,
         fetcher,
-        { refreshInterval: 30000 }
+        { refreshInterval: 10000 }
     )
 
     const [selectedTokenId, setSelectedTokenId] = useState<string | null>(null)
+    const [historyInterval, setHistoryInterval] = useState<'1h' | '1d'>('1h')
 
     // Set default selected token when market loads
-    if (market && !selectedTokenId) {
+    useEffect(() => {
+        if (!market || selectedTokenId) return
         if (market.marketType === 1 && market.childMarkets && market.childMarkets.length > 0) {
             // Categorical: Select first child market's YES token by default
             setSelectedTokenId(market.childMarkets[0].yesTokenId)
@@ -217,12 +227,12 @@ export default function MarketDetailPage({ params, searchParams }: { params: { i
             // Binary: Select YES token
             setSelectedTokenId(market.yesTokenId)
         }
-    }
+    }, [market, selectedTokenId])
 
     const { data: orderbook } = useSWR<Orderbook>(
         selectedTokenId ? `/api/orderbook?tokenId=${selectedTokenId}` : null,
         fetcher,
-        { refreshInterval: 5000 }
+        { refreshInterval: 10000 }
     )
 
     if (isLoading) {
@@ -386,8 +396,24 @@ export default function MarketDetailPage({ params, searchParams }: { params: { i
                                 <div className="mb-6 flex items-center gap-2">
                                     <LineChartIcon className="h-5 w-5 text-blue-400" />
                                     <h3 className="text-lg font-semibold text-slate-100">Price History</h3>
+                                    <div className="ml-auto flex items-center gap-2 rounded-full bg-slate-900/60 p-1 ring-1 ring-white/10">
+                                        {(['1h', '1d'] as const).map((value) => (
+                                            <button
+                                                key={value}
+                                                onClick={() => setHistoryInterval(value)}
+                                                className={cn(
+                                                    'rounded-full px-3 py-1 text-xs font-semibold transition-all',
+                                                    historyInterval === value
+                                                        ? 'bg-blue-500/20 text-blue-200'
+                                                        : 'text-slate-400 hover:text-slate-200'
+                                                )}
+                                            >
+                                                {value.toUpperCase()}
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
-                                <PriceChart market={market} selectedTokenId={selectedTokenId} />
+                                <PriceChart market={market} selectedTokenId={selectedTokenId} interval={historyInterval} />
                             </div>
                         )}
                     </div>

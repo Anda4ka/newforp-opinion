@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState, useEffect } from 'react'
+import { useCallback, useMemo, useState, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import useSWR from 'swr'
 import type { ClassValue } from 'clsx'
@@ -12,12 +12,10 @@ import {
   LineChart as LineChartIcon,
   Wallet,
   X,
-  TrendingUp,
-  TrendingDown,
 } from 'lucide-react'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
-import type { MarketMover, UserPosition } from '@/lib/types'
+import type { Market, UserPosition } from '@/lib/types'
 
 function cn(...classes: ClassValue[]) {
   return twMerge(clsx(classes))
@@ -26,15 +24,10 @@ function cn(...classes: ClassValue[]) {
 const fetcher = async <T,>(url: string): Promise<T> => {
   const res = await fetch(url)
   if (!res.ok) {
-    throw new Error(`Request failed: ${res.status}`)
+    const errorData = await res.json().catch(() => ({}))
+    throw new Error(errorData.error || `Request failed: ${res.status}`)
   }
   return res.json() as Promise<T>
-}
-
-function formatPct(value: number) {
-  const pct = value * 100
-  const sign = pct > 0 ? '+' : ''
-  return `${sign}${pct.toFixed(2)}%`
 }
 
 function formatUsdCompact(value: number) {
@@ -83,8 +76,19 @@ interface MarketWithPrices {
   priceChangePct?: number
   cutoffAt: number
   marketType: number
-  childMarkets?: any[] // Simplified for UI
+  childMarkets?: Market[]
+  childMarketsPreview?: ChildMarketPreview[]
 }
+
+interface ChildMarketPreview {
+  id: number
+  title: string
+  yesTokenId: string
+  yesPrice: number
+  volume24h: string
+}
+
+const marketsPerPage = 100
 
 function SkeletonCard() {
   return (
@@ -98,6 +102,13 @@ function EmptyState({ label }: { label: ReactNode }) {
       {label}
     </div>
   )
+}
+
+const estimateColumns = (width: number) => {
+  if (width >= 1280) return 4
+  if (width >= 1024) return 3
+  if (width >= 640) return 2
+  return 1
 }
 
 function ChartModal({
@@ -189,28 +200,25 @@ export default function Home() {
   const [page, setPage] = useState(1)
   const [allMarkets, setAllMarkets] = useState<MarketWithPrices[]>([])
   const [hasMore, setHasMore] = useState(true)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [gridMetrics, setGridMetrics] = useState({
+    scrollTop: 0,
+    viewportHeight: 0,
+    gridTop: 0,
+    columns: 1,
+  })
 
-  // Search and Filter State
+  // Search State
   const [searchQuery, setSearchQuery] = useState('')
-  const [filterType, setFilterType] = useState<'ALL' | 'BINARY' | 'CATEGORICAL'>('ALL')
 
   // Derived filtered markets
   const filteredMarkets = useMemo(() => {
     return allMarkets.filter(market => {
-      // 1. Search Filter
       const matchesSearch = market.title.toLowerCase().includes(searchQuery.toLowerCase())
-
-      // 2. Type Filter
-      // Improved logic: If marketType is 1 OR has childMarkets, treat as Categorical
       const isCategorical = market.marketType === 1 || (market.childMarkets && market.childMarkets.length > 0)
-      const matchesType =
-        filterType === 'ALL' ? true :
-          filterType === 'CATEGORICAL' ? isCategorical :
-            !isCategorical // BINARY
-
-      return matchesSearch && matchesType
+      return matchesSearch && !isCategorical
     })
-  }, [allMarkets, searchQuery, filterType])
+  }, [allMarkets, searchQuery])
 
   const onWatch = useCallback(() => {
     setWatchedAddress(walletInput.trim())
@@ -233,13 +241,13 @@ export default function Home() {
         // Reset on first page
         setAllMarkets(marketsData.markets)
         // Check if there are more pages
-        setHasMore(marketsData.markets.length === 50 && marketsData.markets.length < marketsData.total)
+        setHasMore(marketsData.markets.length === marketsPerPage && marketsData.markets.length < marketsData.total)
       } else {
         // Append new markets
         setAllMarkets(prev => {
           const updated = [...prev, ...marketsData.markets]
           // Check if there are more pages
-          setHasMore(marketsData.markets.length === 50 && updated.length < marketsData.total)
+          setHasMore(marketsData.markets.length === marketsPerPage && updated.length < marketsData.total)
           return updated
         })
       }
@@ -251,6 +259,61 @@ export default function Home() {
       setPage(prev => prev + 1)
     }
   }, [marketsLoading, hasMore])
+
+  useEffect(() => {
+    const updateMetrics = () => {
+      const gridTop = gridRef.current?.getBoundingClientRect().top ?? 0
+      setGridMetrics({
+        scrollTop: window.scrollY,
+        viewportHeight: window.innerHeight,
+        gridTop: gridTop + window.scrollY,
+        columns: estimateColumns(window.innerWidth),
+      })
+    }
+
+    updateMetrics()
+    window.addEventListener('scroll', updateMetrics, { passive: true })
+    window.addEventListener('resize', updateMetrics)
+
+    return () => {
+      window.removeEventListener('scroll', updateMetrics)
+      window.removeEventListener('resize', updateMetrics)
+    }
+  }, [])
+
+  const {
+    visibleMarkets,
+    totalRows,
+    startRow,
+    rowHeight,
+  } = useMemo(() => {
+    const columns = Math.max(1, gridMetrics.columns)
+    const rowHeight = 220
+    const totalRows = Math.ceil(filteredMarkets.length / columns)
+    const scrollOffset = gridMetrics.scrollTop - gridMetrics.gridTop
+    const bufferRows = 2
+    const startRow = Math.max(0, Math.floor(scrollOffset / rowHeight) - bufferRows)
+    const visibleRowCount = Math.ceil(gridMetrics.viewportHeight / rowHeight) + bufferRows * 2
+    const endRow = Math.min(totalRows, startRow + visibleRowCount)
+    const startIndex = startRow * columns
+    const endIndex = Math.min(filteredMarkets.length, endRow * columns)
+
+    return {
+      visibleMarkets: filteredMarkets.slice(startIndex, endIndex),
+      totalRows,
+      startRow,
+      rowHeight,
+    }
+  }, [filteredMarkets, gridMetrics])
+
+  useEffect(() => {
+    if (!hasMore || marketsLoading) return
+    const gridBottom = gridMetrics.gridTop + totalRows * rowHeight
+    const nearEnd = gridMetrics.scrollTop + gridMetrics.viewportHeight >= gridBottom - rowHeight * 2
+    if (nearEnd) {
+      loadMore()
+    }
+  }, [gridMetrics, hasMore, marketsLoading, loadMore, rowHeight, totalRows])
 
   const positions = useSWR<UserPosition[]>(
     watchedAddress ? `/api/user/positions?address=${encodeURIComponent(watchedAddress)}` : null,
@@ -302,7 +365,7 @@ export default function Home() {
           </div>
 
 
-          {/* Search and Filter Controls */}
+          {/* Search Controls */}
           <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center">
             {/* Search */}
             <div className="relative flex-1">
@@ -318,23 +381,13 @@ export default function Home() {
               />
             </div>
 
-            {/* Filter Tabs */}
-            <div className="flex rounded-xl bg-slate-900/60 p-1 ring-1 ring-white/10">
-              {(['ALL', 'BINARY', 'CATEGORICAL'] as const).map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setFilterType(type)}
-                  className={cn(
-                    "px-4 py-1.5 text-xs font-semibold rounded-lg transition-all",
-                    filterType === type
-                      ? "bg-slate-700 text-white shadow-sm"
-                      : "text-slate-400 hover:text-slate-200"
-                  )}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
+            <a
+              href="/categories"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900/60 px-4 py-2 text-xs font-semibold text-slate-200 ring-1 ring-white/10 transition-all hover:bg-slate-900/80"
+            >
+              View Categories
+              <ArrowUpRight className="h-3 w-3" />
+            </a>
           </div>
         </header >
 
@@ -347,81 +400,55 @@ export default function Home() {
               ))}
             </div>
           ) : marketsError ? (
-            <EmptyState label="Failed to load markets. Please try again later." />
+            <EmptyState
+              label={
+                marketsError.message.includes('temporarily unavailable')
+                  ? 'Website is under maintenance.'
+                  : 'Failed to load markets. Please try again later.'
+              }
+            />
           ) : allMarkets.length === 0 ? (
             <EmptyState label="No markets available." />
           ) : (
             <>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {filteredMarkets.map((market) => {
-                  // Calculate price change if possible (simplified - could be enhanced with historical data)
-                  const hasTrending = market.priceChangePct !== undefined
-                  const isPositive = market.priceChangePct !== undefined && market.priceChangePct >= 0
+              <div ref={gridRef} className="relative">
+                <div style={{ height: totalRows * rowHeight }}>
+                  <div style={{ transform: `translateY(${startRow * rowHeight}px)` }}>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      {visibleMarkets.map((market) => {
+                        const chance = Math.max(0, Math.min(1, market.yesPrice)) * 100
 
-                  // Improved Categorical Detection for Badge
-                  const isCategorical = market.marketType === 1 || (market.childMarkets && market.childMarkets.length > 0)
-
-                  return (
-                    <a
-                      key={`market-${market.id}`}
-                      href={`/market/${market.id}?type=${isCategorical ? 1 : 0}`}
-                      className="group relative overflow-hidden rounded-2xl bg-slate-900/40 backdrop-blur-sm ring-1 ring-white/10 p-5 text-left transition-all hover:ring-white/20 hover:bg-slate-900/50 block"
-                    >
-                      {/* Market Title - Top */}
-                      <div className="mb-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          {isCategorical ? (
-                            <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-bold text-blue-400 ring-1 ring-blue-500/20">CATEGORICAL</span>
-                          ) : (
-                            <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 ring-1 ring-emerald-500/20">BINARY</span>
-                          )}
-                        </div>
-                        <div className="line-clamp-2 text-sm font-semibold text-slate-100 group-hover:text-white transition-colors">
-                          {market.title || `Market ${market.id}`}
-                        </div>
-                      </div>
-
-                      {/* Prices and Info - Bottom as Tags */}
-                      <div className="flex flex-wrap items-center gap-2">
-                        {!isCategorical ? (
-                          <>
-                            <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                              YES {market.yesPrice.toFixed(2)}
-                            </span>
-                            <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                              NO {market.noPrice.toFixed(2)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-300 ring-1 ring-white/5">
-                            View Outcomes &rarr;
-                          </span>
-                        )}
-
-                        {hasTrending && (
-                          <span
-                            className={cn(
-                              'rounded-lg px-2.5 py-1 text-xs font-bold ring-1 flex items-center gap-1',
-                              isPositive
-                                ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/20'
-                                : 'bg-rose-500/10 text-rose-300 ring-rose-500/20'
-                            )}
+                        return (
+                          <a
+                            key={`market-${market.id}`}
+                            href={`/market/${market.id}?type=0`}
+                            className="group relative block overflow-hidden rounded-2xl bg-slate-900/40 p-5 text-left ring-1 ring-white/10 transition-all hover:bg-slate-900/50 hover:ring-white/20"
                           >
-                            {isPositive ? (
-                              <TrendingUp className="h-3 w-3" />
-                            ) : (
-                              <TrendingDown className="h-3 w-3" />
-                            )}
-                            {formatPct(market.priceChangePct!)}
-                          </span>
-                        )}
-                        <span className="ml-auto rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-400 ring-1 ring-white/5">
-                          ${formatUsdCompact(Number(market.volume24h) || 0)}
-                        </span>
-                      </div>
-                    </a>
-                  )
-                })}
+                            {/* Market Title - Top */}
+                            <div className="mb-4">
+                              <div className="mb-2 flex items-center gap-2">
+                                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-400 ring-1 ring-emerald-500/20">BINARY</span>
+                              </div>
+                              <div className="line-clamp-2 text-sm font-semibold text-slate-100 transition-colors group-hover:text-white">
+                                {market.title || `Market ${market.id}`}
+                              </div>
+                            </div>
+
+                            {/* Prices and Info - Bottom as Tags */}
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/5">
+                                {Math.round(chance)}% chance
+                              </span>
+                              <span className="ml-auto rounded-lg bg-slate-800/60 px-2.5 py-1 text-xs font-medium text-slate-400 ring-1 ring-white/5">
+                                ${formatUsdCompact(Number(market.volume24h) || 0)}
+                              </span>
+                            </div>
+                          </a>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Load More Button */}
@@ -430,7 +457,7 @@ export default function Home() {
                   <button
                     onClick={loadMore}
                     disabled={marketsLoading}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800/60 backdrop-blur-sm px-6 py-3 text-sm font-semibold text-slate-200 ring-1 ring-white/10 hover:bg-slate-800/80 hover:ring-white/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-800/60 px-6 py-3 text-sm font-semibold text-slate-200 ring-1 ring-white/10 transition-all hover:bg-slate-800/80 hover:ring-white/20 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {marketsLoading ? (
                       <>
